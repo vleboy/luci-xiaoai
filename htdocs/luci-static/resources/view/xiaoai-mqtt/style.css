@@ -494,3 +494,109 @@ input[type="number"]:hover {
 #mqtt_control_btn.cbi-button-reset:hover:not(:disabled) {
     background-color: var(--color-secondary-dark, #545b62);
 }
+
+/* 服务控制按钮样式 */
+.service-controls {
+    background: linear-gradient(135deg, var(--color-bg-lighter, #f8f9fa) 0%, var(--color-bg, white) 100%);
+    border: 1px solid var(--color-border, #dee2e6);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.service-controls h4 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--color-text, #495057);
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--color-primary-light, #a5d8ff);
+}
+
+.control-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.control-buttons .cbi-button {
+    min-width: 120px;
+    padding: 12px 20px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.control-buttons .cbi-button-action {
+    background: linear-gradient(135deg, var(--color-success, #2b8a3e) 0%, var(--color-success-dark, #2b8a3e) 100%);
+    color: white;
+}
+
+.control-buttons .cbi-button-action:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-success-dark, #2b8a3e) 0%, var(--color-success-darker, #2b8a3e) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(43, 138, 62, 0.3);
+}
+
+.control-buttons .cbi-button-negative {
+    background: linear-gradient(135deg, var(--color-error, #dc3545) 0%, var(--color-error-dark, #bb2d3b) 100%);
+    color: white;
+}
+
+.control-buttons .cbi-button-negative:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-error-dark, #bb2d3b) 0%, var(--color-error-darker, #a71e2a) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+.control-buttons .cbi-button-reset {
+    background: linear-gradient(135deg, var(--color-warning, #e67700) 0%, var(--color-warning-dark, #d9480f) 100%);
+    color: white;
+}
+
+.control-buttons .cbi-button-reset:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-warning-dark, #d9480f) 0%, var(--color-warning-darker, #c92a2a) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(230, 119, 0, 0.3);
+}
+
+.control-buttons .cbi-button-positive {
+    background: linear-gradient(135deg, var(--color-success, #2b8a3e) 0%, var(--color-success-dark, #2b8a3e) 100%);
+    color: white;
+}
+
+.control-buttons .cbi-button-positive:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-success-dark, #2b8a3e) 0%, var(--color-success-darker, #2b8a3e) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(43, 138, 62, 0.3);
+}
+
+.control-buttons .cbi-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* 响应式设计调整 */
+@media (max-width: 768px) {
+    .control-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .control-buttons .cbi-button {
+        width: 100%;
+        margin-right: 0 !important;
+        margin-bottom: 10px;
+    }
+    
+    .control-buttons .cbi-button:last-child {
+        margin-bottom: 0;
+    }
+}

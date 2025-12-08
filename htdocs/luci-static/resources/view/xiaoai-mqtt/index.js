@@ -51,6 +51,25 @@ return view.extend({
                             E('em', { class: 'spinning' }, _('获取中...'))
                         ])
                     ])
+                ]),
+                E('div', { class: 'service-controls', style: 'margin-top: 20px;' }, [
+                    E('h4', { style: 'margin-bottom: 10px;' }, _('服务控制')),
+                    E('div', { class: 'control-buttons' }, [
+                        E('button', {
+                            id: 'start_service_btn',
+                            class: 'cbi-button cbi-button-action',
+                            style: 'margin-right: 10px;'
+                        }, _('启动服务')),
+                        E('button', {
+                            id: 'stop_service_btn',
+                            class: 'cbi-button cbi-button-negative',
+                            style: 'margin-right: 10px;'
+                        }, _('停止服务')),
+                        E('button', {
+                            id: 'restart_service_btn',
+                            class: 'cbi-button cbi-button-reset'
+                        }, _('重启服务'))
+                    ])
                 ])
             ]);
         }, this);
@@ -289,6 +308,58 @@ return view.extend({
                     });
                 });
             }
+
+            // 服务控制按钮事件处理
+            function setupServiceControlButton(buttonId, endpoint, successMessage) {
+                var button = document.getElementById(buttonId);
+                if (button) {
+                    button.addEventListener('click', function() {
+                        var btn = this;
+                        var originalText = btn.textContent;
+                        
+                        // 禁用按钮并显示加载状态
+                        btn.disabled = true;
+                        btn.textContent = _('处理中...');
+                        btn.className = 'cbi-button cbi-button-reset';
+                        
+                        // 发送服务控制请求
+                        L.Request.post('/cgi-bin/luci/admin/services/xiaoai-mqtt/' + endpoint, {
+                            json: true
+                        }).then(function(xhr) {
+                            var response = JSON.parse(xhr.responseText);
+                            if (response.success) {
+                                btn.textContent = successMessage || _('操作成功');
+                                btn.className = 'cbi-button cbi-button-positive';
+                                // 立即更新状态
+                                setTimeout(updateStatus, 500);
+                                // 3秒后恢复按钮状态
+                                setTimeout(function() {
+                                    // 按钮状态会在下一次轮询时更新
+                                }, 3000);
+                            } else {
+                                btn.textContent = _('失败: ') + response.message;
+                                btn.className = 'cbi-button cbi-button-negative';
+                                // 5秒后恢复按钮状态
+                                setTimeout(function() {
+                                    // 按钮状态会在下一次轮询时更新
+                                }, 5000);
+                            }
+                        }).catch(function(err) {
+                            btn.textContent = _('请求失败');
+                            btn.className = 'cbi-button cbi-button-negative';
+                            // 5秒后恢复按钮状态
+                            setTimeout(function() {
+                                // 按钮状态会在下一次轮询时更新
+                            }, 5000);
+                        });
+                    });
+                }
+            }
+
+            // 设置服务控制按钮
+            setupServiceControlButton('start_service_btn', 'start', _('启动成功'));
+            setupServiceControlButton('stop_service_btn', 'stop', _('停止成功'));
+            setupServiceControlButton('restart_service_btn', 'restart', _('重启成功'));
         });
 
         return m.render();

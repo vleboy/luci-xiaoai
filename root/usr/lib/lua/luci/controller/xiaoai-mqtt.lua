@@ -6,6 +6,9 @@ function index()
     entry({"admin", "services", "xiaoai-mqtt", "log"}, template("xiaoai-mqtt/log"), _("日志"), 20)
     entry({"admin", "services", "xiaoai-mqtt", "status"}, call("get_status")).leaf = true
     entry({"admin", "services", "xiaoai-mqtt", "reconnect"}, call("reconnect_mqtt")).leaf = true
+    entry({"admin", "services", "xiaoai-mqtt", "start"}, call("start_service")).leaf = true
+    entry({"admin", "services", "xiaoai-mqtt", "stop"}, call("stop_service")).leaf = true
+    entry({"admin", "services", "xiaoai-mqtt", "restart"}, call("restart_service")).leaf = true
     entry({"admin", "services", "xiaoai-mqtt", "clear_log"}, call("clear_log"))
     entry({"admin", "services", "xiaoai-mqtt", "download_log"}, call("download_log"))
 end
@@ -191,4 +194,126 @@ function download_log()
     luci.http.header("Content-Disposition", "attachment; filename=xiaoai-mqtt.log")
     luci.http.prepare_content("text/plain")
     luci.http.write(content)
+end
+
+function start_service()
+    local response = {
+        success = false,
+        message = ""
+    }
+    
+    -- 检查服务是否已经在运行
+    local is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
+    
+    if is_running then
+        response.message = "服务已经在运行"
+        luci.http.prepare_content("application/json")
+        luci.http.write_json(response)
+        return
+    end
+    
+    -- 启动服务
+    local result = luci.sys.call("/etc/init.d/xiaoai-mqtt start >/dev/null 2>&1")
+    
+    if result == 0 then
+        response.success = true
+        response.message = "服务启动成功"
+        
+        -- 更新状态文件
+        local fs = require "nixio.fs"
+        if fs.access("/var/run/xiaoai-mqtt.status") then
+            local status_content = fs.readfile("/var/run/xiaoai-mqtt.status") or ""
+            local new_content = {}
+            for line in status_content:gmatch("[^\r\n]+") do
+                if not line:match("last_action=") then
+                    table.insert(new_content, line)
+                end
+            end
+            table.insert(new_content, "last_action=服务已启动")
+            fs.writefile("/var/run/xiaoai-mqtt.status", table.concat(new_content, "\n"))
+        end
+    else
+        response.message = "服务启动失败"
+    end
+    
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(response)
+end
+
+function stop_service()
+    local response = {
+        success = false,
+        message = ""
+    }
+    
+    -- 检查服务是否在运行
+    local is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
+    
+    if not is_running then
+        response.message = "服务未在运行"
+        luci.http.prepare_content("application/json")
+        luci.http.write_json(response)
+        return
+    end
+    
+    -- 停止服务
+    local result = luci.sys.call("/etc/init.d/xiaoai-mqtt stop >/dev/null 2>&1")
+    
+    if result == 0 then
+        response.success = true
+        response.message = "服务停止成功"
+        
+        -- 更新状态文件
+        local fs = require "nixio.fs"
+        if fs.access("/var/run/xiaoai-mqtt.status") then
+            local status_content = fs.readfile("/var/run/xiaoai-mqtt.status") or ""
+            local new_content = {}
+            for line in status_content:gmatch("[^\r\n]+") do
+                if not line:match("last_action=") then
+                    table.insert(new_content, line)
+                end
+            end
+            table.insert(new_content, "last_action=服务已停止")
+            fs.writefile("/var/run/xiaoai-mqtt.status", table.concat(new_content, "\n"))
+        end
+    else
+        response.message = "服务停止失败"
+    end
+    
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(response)
+end
+
+function restart_service()
+    local response = {
+        success = false,
+        message = ""
+    }
+    
+    -- 重启服务
+    local result = luci.sys.call("/etc/init.d/xiaoai-mqtt restart >/dev/null 2>&1")
+    
+    if result == 0 then
+        response.success = true
+        response.message = "服务重启成功"
+        
+        -- 更新状态文件
+        local fs = require "nixio.fs"
+        if fs.access("/var/run/xiaoai-mqtt.status") then
+            local status_content = fs.readfile("/var/run/xiaoai-mqtt.status") or ""
+            local new_content = {}
+            for line in status_content:gmatch("[^\r\n]+") do
+                if not line:match("last_action=") then
+                    table.insert(new_content, line)
+                end
+            end
+            table.insert(new_content, "last_action=服务已重启")
+            fs.writefile("/var/run/xiaoai-mqtt.status", table.concat(new_content, "\n"))
+        end
+    else
+        response.message = "服务重启失败"
+    end
+    
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(response)
 end
