@@ -1,0 +1,142 @@
+name: 编译 ImmortalWrt 插件 (luci-app-xiaoai-mqtt)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "目标平台/架构"
+        required: true
+        default: "x86/64"
+      firmware_version:
+        description: "固件版本"
+        required: true
+        default: "24.10.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v2
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+          gettext git java-propose-classpath libelf-dev libncurses5-dev \
+          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
+          unzip wget rsync subversion swig time xsltproc zlib1g-dev tree zstd
+
+      - name: 设置 Python 软链接
+        run: |
+          sudo ln -sf /usr/bin/python3 /usr/bin/python
+
+      - name: 设置目标变量
+        id: set_target
+        run: |
+          TARGET_DASH=$(echo ${{ github.event.inputs.target }} | sed 's/\//-/')
+          echo "TARGET_DASH=$TARGET_DASH" >> $GITHUB_OUTPUT
+
+      - name: 下载并解压 ImmortalWrt 源码
+        run: |
+          SDK_BASE_URL="https://mirror.nju.edu.cn/immortalwrt/releases/${{ github.event.inputs.firmware_version }}/targets/${{ github.event.inputs.target }}/"
+          SDK_FILE=$(curl -s $SDK_BASE_URL | grep -oP 'immortalwrt-sdk-.*?-${{ steps.set_target.outputs.TARGET_DASH }}_gcc-.*?Linux-x86_64.tar.zst' | head -n 1)
+          if [ -z "$SDK_FILE" ]; then
+            echo "无法找到匹配的 SDK 文件"
+            exit 1
+          fi
+          SDK_URL="${SDK_BASE_URL}${SDK_FILE}"
+          echo "下载 SDK: $SDK_URL"
+          wget $SDK_URL -O immortalwrt.tar.zst
+          mkdir immortalwrt
+          tar -I zstd -xvf immortalwrt.tar.zst -C immortalwrt --strip-components 1
+
+      - name: 检查 SDK 下载
+        run: |
+          if [ ! -f immortalwrt.tar.zst ]; then
+            echo "SDK 下载失败"
+            exit 1
+          fi
+
+      - name: 复制插件源码到 SDK
+        working-directory: immortalwrt/package
+        run: |
+          # 创建插件目录
+          mkdir -p luci-app-xiaoai-mqtt
+          # 复制所有文件
+          cp -r $GITHUB_WORKSPACE/* luci-app-xiaoai-mqtt/
+          # 移除不需要的目录
+          rm -rf luci-app-xiaoai-mqtt/.git
+          rm -rf luci-app-xiaoai-mqtt/immortalwrt
+
+      - name: 获取插件信息
+        id: plugin_info
+        working-directory: immortalwrt/package/luci-app-xiaoai-mqtt
+        run: |
+          # 读取Makefile获取插件信息
+          PKG_NAME=$(grep -E '^PKG_NAME:=' Makefile | cut -d '=' -f 2)
+          PKG_VERSION=$(grep -E '^PKG_VERSION:=' Makefile | cut -d '=' -f 2)
+          echo "插件包名: $PKG_NAME"
+          echo "插件版本: $PKG_VERSION"
+          echo "PLUGIN_NAME=$PKG_NAME" >> $GITHUB_ENV
+          echo "PLUGIN_VERSION=$PKG_VERSION" >> $GITHUB_ENV
+
+      - name: 更新 feeds
+        working-directory: immortalwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 配置 ImmortalWrt
+        working-directory: immortalwrt
+        run: |
+          # 基本配置
+          echo "CONFIG_TARGET_x86=y" > .config
+          echo "CONFIG_TARGET_x86_64=y" >> .config
+          echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+          
+          # 插件配置
+          echo "CONFIG_PACKAGE_luci-app-xiaoai-mqtt=y" >> .config
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_luci-base=y" >> .config
+          echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-base=y" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-ipkg=y" >> .config
+          echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+          echo "CONFIG_PACKAGE_mosquitto-client-ssl=y" >> .config
+          
+          make defconfig
+
+      - name: 编译插件
+        working-directory: immortalwrt
+        run: |
+          make package/luci-app-xiaoai-mqtt/compile V=s -j$(nproc)
+
+      - name: 整理文件
+        run: |
+          mkdir -p firmware
+          find immortalwrt/bin/packages/ -name "luci-app-xiaoai-mqtt*.ipk" | xargs -I {} cp {} firmware/
+          cd firmware
+          for file in *.ipk; do
+            new_name="${{ steps.set_target.outputs.TARGET_DASH }}-${{ github.event.inputs.firmware_version }}-luci-app-xiaoai-mqtt-${{ env.PLUGIN_VERSION }}.ipk"
+            mv "$file" "$new_name"
+          done
+          echo "生成的文件列表:"
+          ls -l
+
+      - name: 上传 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set_target.outputs.TARGET_DASH }}-${{ github.event.inputs.firmware_version }}-luci-app-xiaoai-mqtt-${{ env.PLUGIN_VERSION }}
+          path: firmware/*
+
+      - name: 创建作业摘要
+        run: |
+          echo "目标平台/架构: ${{ github.event.inputs.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "固件版本: ${{ github.event.inputs.firmware_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "插件名称: luci-app-xiaoai-mqtt" >> $GITHUB_STEP_SUMMARY
+          echo "插件版本: ${{ env.PLUGIN_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "生成的文件列表:" >> $GITHUB_STEP_SUMMARY
+          ls -l firmware/* >> $GITHUB_STEP_SUMMARY

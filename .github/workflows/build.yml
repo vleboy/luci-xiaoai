@@ -1,9 +1,7 @@
-name: Build luci-app-xiaoai-mqtt
+name: Build luci-app-xiaoai-mqtt (Simple)
 
 on: [push, pull_request]
-env:
-  SDK_VERSION: 24.10.0
-  SDK_TARGET: x86/64
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,19 +14,25 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y make gcc g++ libc6-dev liblua5.3-dev libmosquitto-dev
-    - name: Setup SDK environment
-      env:
-        SDK_PATH: ${{ github.workspace }}/sdk-tools
-      run: |
-        export PATH=$PATH:$SDK_PATH/make
 
-    - name: Build package
+    - name: Check Makefile syntax
       run: |
-        export PATH=$PATH:$SDK_PATH/make
-        make package
+        make -n
 
-    - name: Upload artifact
+    - name: Create README for compilation
       run: |
-        actions/upload-artifact@v4:
-          name: luci-app-xiaoai-mqtt-package
-          path: bin/packages/*
+        echo "# Compilation Instructions" > COMPILE.md
+        echo "" >> COMPILE.md
+        echo "This package needs to be compiled with OpenWrt/ImmortalWrt SDK." >> COMPILE.md
+        echo "For proper compilation, use the build-immortalwrt.yml workflow." >> COMPILE.md
+        echo "" >> COMPILE.md
+        echo "To compile manually:" >> COMPILE.md
+        echo "1. Download ImmortalWrt SDK for your target" >> COMPILE.md
+        echo "2. Copy this package to package/feeds/luci/" >> COMPILE.md
+        echo "3. Run: make package/luci-app-xiaoai-mqtt/compile" >> COMPILE.md
+
+    - name: Upload compilation instructions
+      uses: actions/upload-artifact@v4
+      with:
+        name: compilation-instructions
+        path: COMPILE.md
