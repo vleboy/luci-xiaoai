@@ -140,134 +140,184 @@ return view.extend({
         o.default = '0';
         o.rmempty = true;
 
-        // 状态更新（优化版）
-        var lastStatus = {};
-        var updateInterval = 3000; // 初始3秒
-        var consecutiveErrors = 0;
-        var maxUpdateInterval = 30000; // 最大30秒
-        
+        // 状态更新函数
         function updateStatus() {
-            return L.Request.get('/cgi-bin/luci/admin/services/xiaoai-mqtt/status').then(function(xhr) {
-                consecutiveErrors = 0;
-                var status = JSON.parse(xhr.responseText);
-                
-                // 检查状态是否真的改变了
-                var hasChanged = false;
-                if (lastStatus.service !== status.service || 
-                    lastStatus.mqtt !== status.mqtt ||
-                    lastStatus.last_action !== status.last_action ||
-                    lastStatus.log_stats !== status.log_stats) {
-                    hasChanged = true;
-                    lastStatus = Object.assign({}, status);
-                }
-                
-                // 如果没有变化且不是第一次更新，可以延长更新间隔
-                if (!hasChanged && updateInterval < maxUpdateInterval) {
-                    updateInterval = Math.min(updateInterval * 1.5, maxUpdateInterval);
-                } else if (hasChanged) {
-                    updateInterval = 3000; // 重置为3秒
-                }
-                
-                var serviceStatus = document.getElementById('service_status');
-                var mqttStatus = document.getElementById('mqtt_status');
-                var lastAction = document.getElementById('last_action');
-                var logStats = document.getElementById('log_stats');
-                var mqttControlBtn = document.getElementById('mqtt_control_btn');
-
-                // 更新服务状态
-                if (serviceStatus) {
-                    serviceStatus.textContent = status.service === 'running' ? _('运行中') : _('已停止');
-                    serviceStatus.className = 'value ' + (status.service === 'running' ? 'running' : 'stopped');
-                }
-                
-                // 更新MQTT状态显示
-                if (mqttStatus) {
-                    var statusText = '';
-                    var statusClass = '';
-                    switch(status.mqtt) {
-                        case 'connected':
-                            statusText = _('已连接');
-                            statusClass = 'status-connected';
-                            break;
-                        case 'connecting':
-                            statusText = _('连接中...');
-                            statusClass = 'status-connecting';
-                            break;
-                        case 'reconnecting':
-                            statusText = _('重新连接中...');
-                            statusClass = 'status-reconnecting';
-                            break;
-                        default:
-                            statusText = _('未连接');
-                            statusClass = 'status-disconnected';
-                    }
-                    mqttStatus.textContent = statusText;
-                    mqttStatus.className = statusClass;
-                }
-                
-                // 更新日志统计
-                if (logStats && status.log_stats) {
-                    var stats = status.log_stats.split('|');
-                    if (stats.length >= 2) {
-                        var lines = parseInt(stats[0]) || 0;
-                        var size = stats[1] || '0B';
-                        logStats.textContent = lines + ' 行 | ' + size;
-                    }
-                }
-                
-                // 更新最近操作
-                if (lastAction) {
-                    lastAction.textContent = status.last_action || _('无');
-                }
-                
-                // 更新控制按钮
-                if (mqttControlBtn) {
-                    mqttControlBtn.style.display = 'inline-block';
+            var url = '/cgi-bin/luci/admin/services/xiaoai-mqtt/status';
+            var timestamp = new Date().getTime();
+            var cacheBusterUrl = url + '?_=' + timestamp;
+            
+            L.Request.get(cacheBusterUrl).then(function(xhr) {
+                try {
+                    var status = JSON.parse(xhr.responseText);
                     
-                    if (status.service !== 'running') {
-                        mqttControlBtn.textContent = _('服务未运行');
-                        mqttControlBtn.disabled = true;
-                        mqttControlBtn.className = 'cbi-button cbi-button-reset';
-                    } else if (status.mqtt === 'connected') {
-                        mqttControlBtn.textContent = _('重新连接');
-                        mqttControlBtn.disabled = false;
-                        mqttControlBtn.className = 'cbi-button cbi-button-action';
-                    } else if (status.mqtt === 'connecting' || status.mqtt === 'reconnecting') {
-                        mqttControlBtn.textContent = _('连接中...');
-                        mqttControlBtn.disabled = true;
-                        mqttControlBtn.className = 'cbi-button cbi-button-reset';
-                    } else {
-                        mqttControlBtn.textContent = _('连接');
-                        mqttControlBtn.disabled = false;
-                        mqttControlBtn.className = 'cbi-button cbi-button-action';
+                    // 更新服务状态
+                    var serviceStatus = document.getElementById('service_status');
+                    if (serviceStatus) {
+                        var statusText = status.service === 'running' ? _('运行中') : _('已停止');
+                        var statusClass = status.service === 'running' ? 'running' : 'stopped';
+                        
+                        // 移除spinning元素
+                        var spinning = serviceStatus.querySelector('.spinning');
+                        if (spinning) {
+                            serviceStatus.removeChild(spinning);
+                        }
+                        
+                        // 创建状态文本
+                        var statusSpan = document.createElement('span');
+                        statusSpan.textContent = statusText;
+                        statusSpan.className = statusClass;
+                        serviceStatus.appendChild(statusSpan);
                     }
+                    
+                    // 更新MQTT状态
+                    var mqttStatus = document.getElementById('mqtt_status');
+                    if (mqttStatus) {
+                        var statusText = '';
+                        var statusClass = '';
+                        switch(status.mqtt) {
+                            case 'connected':
+                                statusText = _('已连接');
+                                statusClass = 'status-connected';
+                                break;
+                            case 'connecting':
+                                statusText = _('连接中...');
+                                statusClass = 'status-connecting';
+                                break;
+                            case 'reconnecting':
+                                statusText = _('重新连接中...');
+                                statusClass = 'status-reconnecting';
+                                break;
+                            default:
+                                statusText = _('未连接');
+                                statusClass = 'status-disconnected';
+                        }
+                        
+                        // 移除spinning元素
+                        var spinning = mqttStatus.querySelector('.spinning');
+                        if (spinning) {
+                            mqttStatus.removeChild(spinning);
+                        }
+                        
+                        // 创建状态文本
+                        var statusSpan = document.createElement('span');
+                        statusSpan.textContent = statusText;
+                        statusSpan.className = statusClass;
+                        mqttStatus.appendChild(statusSpan);
+                    }
+                    
+                    // 更新最近操作
+                    var lastAction = document.getElementById('last_action');
+                    if (lastAction) {
+                        // 移除spinning元素
+                        var spinning = lastAction.querySelector('.spinning');
+                        if (spinning) {
+                            lastAction.removeChild(spinning);
+                        }
+                        
+                        // 创建操作文本
+                        var actionSpan = document.createElement('span');
+                        actionSpan.textContent = status.last_action || _('无');
+                        lastAction.appendChild(actionSpan);
+                    }
+                    
+                    // 更新日志统计
+                    var logStats = document.getElementById('log_stats');
+                    if (logStats && status.log_stats) {
+                        // 移除spinning元素
+                        var spinning = logStats.querySelector('.spinning');
+                        if (spinning) {
+                            logStats.removeChild(spinning);
+                        }
+                        
+                        // 创建统计文本
+                        var stats = status.log_stats.split('|');
+                        if (stats.length >= 2) {
+                            var lines = parseInt(stats[0]) || 0;
+                            var size = stats[1] || '0B';
+                            var statsSpan = document.createElement('span');
+                            statsSpan.textContent = lines + ' 行 | ' + size;
+                            logStats.appendChild(statsSpan);
+                        }
+                    }
+                    
+                    // 更新MQTT控制按钮
+                    var mqttControlBtn = document.getElementById('mqtt_control_btn');
+                    if (mqttControlBtn) {
+                        mqttControlBtn.style.display = 'inline-block';
+                        
+                        if (status.service !== 'running') {
+                            mqttControlBtn.textContent = _('服务未运行');
+                            mqttControlBtn.disabled = true;
+                            mqttControlBtn.className = 'cbi-button cbi-button-reset';
+                        } else if (status.mqtt === 'connected') {
+                            mqttControlBtn.textContent = _('重新连接');
+                            mqttControlBtn.disabled = false;
+                            mqttControlBtn.className = 'cbi-button cbi-button-action';
+                        } else if (status.mqtt === 'connecting' || status.mqtt === 'reconnecting') {
+                            mqttControlBtn.textContent = _('连接中...');
+                            mqttControlBtn.disabled = true;
+                            mqttControlBtn.className = 'cbi-button cbi-button-reset';
+                        } else {
+                            mqttControlBtn.textContent = _('连接');
+                            mqttControlBtn.disabled = false;
+                            mqttControlBtn.className = 'cbi-button cbi-button-action';
+                        }
+                    }
+                    
+                    // 更新服务控制按钮状态
+                    var startBtn = document.getElementById('start_service_btn');
+                    var stopBtn = document.getElementById('stop_service_btn');
+                    var restartBtn = document.getElementById('restart_service_btn');
+                    
+                    if (startBtn) {
+                        startBtn.disabled = status.service === 'running';
+                        startBtn.className = status.service === 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-action';
+                    }
+                    
+                    if (stopBtn) {
+                        stopBtn.disabled = status.service !== 'running';
+                        stopBtn.className = status.service !== 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-negative';
+                    }
+                    
+                    if (restartBtn) {
+                        restartBtn.disabled = status.service !== 'running';
+                        restartBtn.className = status.service !== 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-reset';
+                    }
+                    
+                } catch (e) {
+                    console.error('解析状态响应失败:', e);
                 }
                 
-                // 安排下一次更新
-                setTimeout(updateStatus, updateInterval);
+                // 3秒后再次更新
+                setTimeout(updateStatus, 3000);
                 
             }).catch(function(err) {
-                consecutiveErrors++;
-                // 错误时增加更新间隔
-                updateInterval = Math.min(updateInterval * 2, maxUpdateInterval);
+                console.error('获取状态失败:', err);
                 
                 // 显示错误状态
                 var mqttStatus = document.getElementById('mqtt_status');
                 if (mqttStatus) {
-                    mqttStatus.textContent = _('获取状态失败');
-                    mqttStatus.className = 'status-disconnected';
+                    var spinning = mqttStatus.querySelector('.spinning');
+                    if (spinning) {
+                        mqttStatus.removeChild(spinning);
+                    }
+                    var errorSpan = document.createElement('span');
+                    errorSpan.textContent = _('获取失败');
+                    errorSpan.className = 'status-disconnected';
+                    mqttStatus.appendChild(errorSpan);
                 }
                 
-                // 安排下一次更新
-                setTimeout(updateStatus, updateInterval);
+                // 5秒后重试
+                setTimeout(updateStatus, 5000);
             });
         }
         
-        // 初始状态更新
-        setTimeout(updateStatus, 1000);
-        
-        // 添加按钮点击事件处理
+        // 页面加载完成后开始更新状态和添加按钮点击事件处理
         document.addEventListener('DOMContentLoaded', function() {
+            // 延迟1秒开始更新，确保DOM完全加载
+            setTimeout(updateStatus, 1000);
+
+            // MQTT控制按钮事件处理
             var mqttControlBtn = document.getElementById('mqtt_control_btn');
             if (mqttControlBtn) {
                 mqttControlBtn.addEventListener('click', function() {

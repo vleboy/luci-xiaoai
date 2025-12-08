@@ -5,6 +5,62 @@ m = Map("xiaoai-mqtt", translate("基本配置"), translate("配置MQTT服务参
 
 -- 配置保存后跳转日志页面
 function m.on_after_save(self)
+    -- 获取当前配置
+    local uci = luci.model.uci.cursor()
+    local config = {}
+    
+    -- 获取MQTT配置
+    config.mqtt = uci:get_all("xiaoai-mqtt", "mqtt") or {}
+    
+    -- 获取WOL配置
+    config.wol = uci:get_all("xiaoai-mqtt", "wol") or {}
+    
+    -- 获取关机配置
+    config.shutdown = uci:get_all("xiaoai-mqtt", "shutdown") or {}
+    
+    -- 构建日志消息
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local log_message = string.format("[%s] 配置已保存\n", timestamp)
+    
+    -- 记录MQTT配置（隐藏敏感信息）
+    log_message = log_message .. string.format("  MQTT配置:\n")
+    log_message = log_message .. string.format("    服务器地址: %s\n", config.mqtt.mqtt_broker or "未设置")
+    log_message = log_message .. string.format("    端口: %s\n", config.mqtt.mqtt_port or "未设置")
+    log_message = log_message .. string.format("    客户端ID: %s\n", config.mqtt.mqtt_client_id or "未设置")
+    log_message = log_message .. string.format("    订阅主题: %s\n", config.mqtt.mqtt_topic or "未设置")
+    
+    -- 记录WOL配置
+    log_message = log_message .. string.format("  WOL配置:\n")
+    log_message = log_message .. string.format("    MAC地址: %s\n", config.wol.mac or "未设置")
+    if config.wol.on_msgs then
+        log_message = log_message .. string.format("    触发消息: %s\n", table.concat(config.wol.on_msgs, ", "))
+    else
+        log_message = log_message .. string.format("    触发消息: 未设置\n")
+    end
+    
+    -- 记录关机配置（隐藏密码）
+    log_message = log_message .. string.format("  关机配置:\n")
+    log_message = log_message .. string.format("    IP地址: %s\n", config.shutdown.ip or "未设置")
+    log_message = log_message .. string.format("    用户名: %s\n", config.shutdown.user or "未设置")
+    log_message = log_message .. string.format("    密码: %s\n", config.shutdown.pass and "******" or "未设置")
+    if config.shutdown.off_msgs then
+        log_message = log_message .. string.format("    关机指令: %s\n", table.concat(config.shutdown.off_msgs, ", "))
+    else
+        log_message = log_message .. string.format("    关机指令: 未设置\n")
+    end
+    
+    -- 写入日志文件
+    local log_file = "/var/log/xiaoai-mqtt.log"
+    local file = io.open(log_file, "a")
+    if file then
+        file:write(log_message .. "\n")
+        file:close()
+    else
+        -- 如果文件不存在，尝试创建
+        os.execute(string.format("echo '%s' >> %s", log_message:gsub("'", "'\"'\"'"), log_file))
+    end
+    
+    -- 重启服务
     os.execute("/etc/init.d/xiaoai-mqtt restart >/dev/null 2>&1")
     luci.http.redirect(luci.dispatcher.build_url("admin/services/xiaoai-mqtt/basic"))
 end
@@ -90,16 +146,6 @@ local off_msgs = s:option(DynamicList, "off_msgs", translate("关机指令"))
 off_msgs.placeholder = "off"
 off_msgs.rmempty = true
 
--- 服务控制
-s = m:section(NamedSection, "main", "service", translate("服务控制"))
-s.anonymous = true
-s.addremove = false
-
-local enable = s:option(Flag, "enabled", translate("启用服务"))
-enable.default = "0"
-enable.rmempty = false
-enable.optional = false
-
 -- 配置验证函数
 local function validate_config()
     local config = uci:get_all("xiaoai-mqtt", "mqtt") or {}
@@ -112,26 +158,13 @@ local function validate_config()
     return true
 end
 
--- 重写启用选项的写操作
-function enable.write(self, section, value)
+-- 配置保存时验证
+function m.on_before_save(self)
     local ok, err = validate_config()
-    if value == "1" and not ok then
-        -- 显示错误信息并阻止保存
-        luci.http.status(500, "Configuration Error")
-        luci.http.write_json({ error = err })
-        return
+    if not ok then
+        return false, err
     end
-    
-    -- 提交配置变更
-    uci:set("xiaoai-mqtt", section, "enabled", value)
-    uci:commit("xiaoai-mqtt")
-    
-    -- 启停服务
-    if value == "1" then
-        os.execute("/etc/init.d/xiaoai-mqtt restart >/dev/null 2>&1 &")
-    else
-        os.execute("/etc/init.d/xiaoai-mqtt stop >/dev/null 2>&1 &")
-    end
+    return true
 end
 
 return m
