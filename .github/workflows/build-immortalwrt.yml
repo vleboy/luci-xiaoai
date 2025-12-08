@@ -64,11 +64,14 @@ jobs:
         run: |
           # 创建插件目录
           mkdir -p luci-app-xiaoai-mqtt
-          # 复制所有文件
-          cp -r $GITHUB_WORKSPACE/* luci-app-xiaoai-mqtt/
-          # 移除不需要的目录
-          rm -rf luci-app-xiaoai-mqtt/.git
-          rm -rf luci-app-xiaoai-mqtt/immortalwrt
+          # 复制所有文件，排除 immortalwrt 和 .git 目录
+          cd $GITHUB_WORKSPACE
+          # 使用 rsync 更可靠地复制，排除特定目录
+          rsync -av --exclude='immortalwrt' --exclude='.git' . ../package/luci-app-xiaoai-mqtt/
+          # 确保在正确的目录
+          cd ../package/luci-app-xiaoai-mqtt
+          # 再次确认移除 .git 目录（如果存在）
+          rm -rf .git 2>/dev/null || true
 
       - name: 获取插件信息
         id: plugin_info
@@ -91,10 +94,17 @@ jobs:
       - name: 配置 ImmortalWrt
         working-directory: immortalwrt
         run: |
-          # 基本配置
-          echo "CONFIG_TARGET_x86=y" > .config
-          echo "CONFIG_TARGET_x86_64=y" >> .config
-          echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+          # 根据目标平台生成配置
+          TARGET="${{ github.event.inputs.target }}"
+          
+          # 解析目标平台（格式如：x86/64, ramips/mt7621）
+          ARCH=$(echo "$TARGET" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET" | cut -d'/' -f2)
+          
+          # 生成基本配置
+          echo "CONFIG_TARGET_${ARCH}=y" > .config
+          echo "CONFIG_TARGET_${ARCH}_${SUBTARGET}=y" >> .config
+          echo "CONFIG_TARGET_${ARCH}_${SUBTARGET}_DEVICE_generic=y" >> .config
           
           # 插件配置
           echo "CONFIG_PACKAGE_luci-app-xiaoai-mqtt=y" >> .config

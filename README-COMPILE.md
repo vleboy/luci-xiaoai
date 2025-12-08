@@ -90,9 +90,13 @@ tar -I zstd -xvf immortalwrt.tar.zst -C immortalwrt --strip-components 1
 ```bash
 cd immortalwrt/package
 mkdir -p luci-app-xiaoai-mqtt
-cp -r /path/to/luci-app-xiaoai-mqtt/* luci-app-xiaoai-mqtt/
-rm -rf luci-app-xiaoai-mqtt/.git
-rm -rf luci-app-xiaoai-mqtt/immortalwrt
+# 复制所有文件，排除 immortalwrt 和 .git 目录
+cd /path/to/luci-app-xiaoai-mqtt
+rsync -av --exclude='immortalwrt' --exclude='.git' . ../../package/luci-app-xiaoai-mqtt/
+# 确保在正确的目录
+cd ../../package/luci-app-xiaoai-mqtt
+# 再次确认移除 .git 目录（如果存在）
+rm -rf .git 2>/dev/null || true
 ```
 
 #### 步骤4：编译
@@ -101,11 +105,16 @@ cd immortalwrt
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
+# 根据目标平台生成配置
+TARGET="x86/64"  # 修改为您需要的目标平台
+ARCH=$(echo "$TARGET" | cut -d'/' -f1)
+SUBTARGET=$(echo "$TARGET" | cut -d'/' -f2)
+
 # 配置
 cat > .config << EOF
-CONFIG_TARGET_x86=y
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_DEVICE_generic=y
+CONFIG_TARGET_${ARCH}=y
+CONFIG_TARGET_${ARCH}_${SUBTARGET}=y
+CONFIG_TARGET_${ARCH}_${SUBTARGET}_DEVICE_generic=y
 CONFIG_PACKAGE_luci-app-xiaoai-mqtt=y
 CONFIG_PACKAGE_luci=y
 CONFIG_PACKAGE_luci-base=y
