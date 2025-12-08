@@ -39,9 +39,14 @@ start_service() {
     chmod 755 /etc/xiaoai-mqtt/mqtt_client.lua
     chmod 755 /etc/xiaoai-mqtt/status.sh
 
-    # 创建日志文件
+    # 创建日志文件并清理旧日志
     touch /var/log/xiaoai-mqtt.log
     chmod 644 /var/log/xiaoai-mqtt.log
+    
+    # 清理旧的日志轮转文件（保留最近5个）
+    for i in {5..10}; do
+        [ -f "/var/log/xiaoai-mqtt.log.$i" ] && rm -f "/var/log/xiaoai-mqtt.log.$i"
+    done
 
     # 注册服务进程
     procd_open_instance

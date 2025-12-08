@@ -5,8 +5,64 @@ function index()
     entry({"admin", "services", "xiaoai-mqtt", "config"}, view("xiaoai-mqtt/index"), _("基本配置"), 10)
     entry({"admin", "services", "xiaoai-mqtt", "log"}, template("xiaoai-mqtt/log"), _("日志"), 20)
     entry({"admin", "services", "xiaoai-mqtt", "status"}, call("get_status")).leaf = true
+    entry({"admin", "services", "xiaoai-mqtt", "reconnect"}, call("reconnect_mqtt")).leaf = true
     entry({"admin", "services", "xiaoai-mqtt", "clear_log"}, call("clear_log"))
     entry({"admin", "services", "xiaoai-mqtt", "download_log"}, call("download_log"))
+end
+
+function reconnect_mqtt()
+    local fs = require "nixio.fs"
+    local util = require "luci.util"
+    
+    local response = {
+        success = false,
+        message = ""
+    }
+    
+    -- 检查服务是否运行
+    local is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
+    
+    if not is_running then
+        response.message = "服务未运行"
+        luci.http.prepare_content("application/json")
+        luci.http.write_json(response)
+        return
+    end
+    
+    -- 读取订阅进程PID
+    local sub_pid = nil
+    if fs.access("/var/run/mosquitto_sub.pid") then
+        local content = fs.readfile("/var/run/mosquitto_sub.pid") or ""
+        sub_pid = tonumber(content:match("%d+"))
+    end
+    
+    if sub_pid then
+        -- 发送SIGHUP信号让进程重新连接
+        local result = luci.sys.call(string.format("kill -1 %d 2>/dev/null", sub_pid))
+        if result == 0 then
+            response.success = true
+            response.message = "已发送重新连接信号"
+            -- 更新状态为连接中
+            if fs.access("/var/run/xiaoai-mqtt.status") then
+                local status_content = fs.readfile("/var/run/xiaoai-mqtt.status") or ""
+                local new_content = {}
+                for line in status_content:gmatch("[^\r\n]+") do
+                    if not line:match("mqtt_connection=") then
+                        table.insert(new_content, line)
+                    end
+                end
+                table.insert(new_content, "mqtt_connection=reconnecting")
+                fs.writefile("/var/run/xiaoai-mqtt.status", table.concat(new_content, "\n"))
+            end
+        else
+            response.message = "无法发送信号给进程"
+        end
+    else
+        response.message = "未找到运行中的MQTT订阅进程"
+    end
+    
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(response)
 end
 
 function get_status()

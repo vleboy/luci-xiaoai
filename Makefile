@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xiaoai-mqtt
-PKG_VERSION:=25.12.08
+PKG_VERSION:=25.12.08.01
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=vleboy <vleboy@gmail.com>

@@ -1,5 +1,18 @@
 local uci = require "luci.model.uci".cursor()
 local nixio = require "nixio"  -- 加载 nixio 库
+
+-- 定义 os.capture 函数（用于执行命令并捕获输出）
+function os.capture(cmd, raw)
+    local f = assert(io.popen(cmd, 'r'))
+    local s = assert(f:read('*a'))
+    f:close()
+    if raw then return s end
+    s = string.gsub(s, '^%s+', '')
+    s = string.gsub(s, '%s+$', '')
+    s = string.gsub(s, '[\n\r]+', ' ')
+    return s
+end
+
 -- 常量定义
 local LOG_FILE = "/var/log/xiaoai-mqtt.log"
 local STATUS_FILE = "/var/run/xiaoai-mqtt.status"
@@ -8,9 +21,61 @@ local SUB_OUTPUT_FILE = "/tmp/mosquitto_sub.out"
 local PID_FILE = "/var/run/xiaoai-mqtt.pid"
 
 
+-- 日志轮转配置
+local LOG_MAX_SIZE = 1024 * 1024  -- 1MB
+local LOG_MAX_FILES = 5
+
+-- 日志轮转函数
+local function rotate_log_if_needed()
+    local fs = require "nixio.fs"
+    local log_file = "/var/log/xiaoai-mqtt.log"
+    
+    -- 检查文件是否存在和大小
+    if not fs.access(log_file) then
+        return
+    end
+    
+    local stat = fs.stat(log_file)
+    if not stat or stat.size < LOG_MAX_SIZE then
+        return
+    end
+    
+    -- 执行轮转
+    write_log("日志文件达到限制，开始轮转...")
+    
+    -- 删除最旧的日志文件
+    local oldest_log = string.format("%s.%d", log_file, LOG_MAX_FILES - 1)
+    if fs.access(oldest_log) then
+        fs.unlink(oldest_log)
+    end
+    
+    -- 重命名现有日志文件
+    for i = LOG_MAX_FILES - 2, 1, -1 do
+        local old_name = string.format("%s.%d", log_file, i)
+        local new_name = string.format("%s.%d", log_file, i + 1)
+        if fs.access(old_name) then
+            fs.rename(old_name, new_name)
+        end
+    end
+    
+    -- 重命名当前日志文件
+    local rotated_name = string.format("%s.1", log_file)
+    fs.rename(log_file, rotated_name)
+    
+    -- 创建新的日志文件
+    fs.writefile(log_file, "")
+    fs.chmod(log_file, 644)
+    
+    write_log("日志轮转完成")
+end
+
 -- 日志记录
 local function write_log(msg)
     local fs = require "nixio.fs"
+    
+    -- 检查是否需要轮转
+    rotate_log_if_needed()
+    
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local log_message = string.format("[%s] %s\n", timestamp, msg)
     fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
@@ -210,6 +275,21 @@ local function main_loop()
     end
 end
 
+-- 强制重新连接函数
+local function force_reconnect()
+    write_log("强制重新连接MQTT...")
+    update_status("mqtt_connection", "reconnecting")
+    
+    -- 读取当前PID
+    local sub_pid = read_pid_file(SUB_PID_FILE)
+    if sub_pid then
+        -- 终止当前进程
+        os.execute(string.format("kill -9 %d 2>/dev/null", sub_pid))
+        write_log(string.format("已终止订阅进程 PID: %d", sub_pid))
+        os.remove(SUB_PID_FILE)
+    end
+end
+
 -- 写入PID文件
 local function write_pid_file()
     local pid = nixio.getpid()
@@ -222,8 +302,6 @@ local function write_pid_file()
     write_log("无法写入PID文件")
     return false
 end
-
--- read_pid_file函数已在上方定义，此处删除重复定义
 
 local function cleanup()
     -- 终止主进程（通过 PID 文件）
@@ -249,15 +327,22 @@ end
 
 -- 信号处理函数必须是全局函数，否则无法被正确调用
 _G.handle_signal = function(sig)
-    write_log(string.format("收到信号 %d，执行清理...", sig))
-    cleanup()
-    os.exit(0)
+    if sig == 1 then  -- SIGHUP: 重新连接信号
+        write_log("收到重新连接信号(SIGHUP)，重新启动MQTT连接...")
+        -- 更新状态为重新连接中
+        update_status("mqtt_connection", "reconnecting")
+        -- 这里我们不需要清理，主循环会检测到进程终止并重新启动
+    else
+        write_log(string.format("收到信号 %d，执行清理...", sig))
+        cleanup()
+        os.exit(0)
+    end
 end
 
 -- 注册信号处理
 nixio.signal(15, "ign")  -- SIGTERM:忽略信号
 nixio.signal(2, "ign")   -- SIGINT:忽略信号
-nixio.signal(1, "ign")   -- SIGHUP:忽略信号
+nixio.signal(1, _G.handle_signal)   -- SIGHUP:调用处理函数
 
 -- 服务入口
 write_log("====== 服务初始化开始 ======")
