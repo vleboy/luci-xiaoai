@@ -76,38 +76,102 @@ function get_status()
         log_stats = "0|0B"
     }
 
-    -- 检查服务进程（同时检查PID文件和进程）
-    local pid_file = "/var/run/xiaoai-mqtt.pid"
-    local has_pid_file = fs.access(pid_file)
-    local pid = nil
+    -- 缓存状态检查结果（简单缓存机制）
+    local cache_key = "status_cache"
+    local cache_time_key = "status_cache_time"
+    local cache_duration = 2  -- 缓存2秒
     
-    if has_pid_file then
-        pid = tonumber((fs.readfile(pid_file) or ""):match("%d+"))
+    -- 检查缓存
+    local current_time = os.time()
+    local cached_data = luci.http.getcookie(cache_key)
+    local cached_time = luci.http.getcookie(cache_time_key)
+    
+    if cached_data and cached_time and (current_time - tonumber(cached_time) < cache_duration) then
+        -- 使用缓存数据
+        local status_data = util.json_decode(cached_data)
+        if status_data then
+            luci.http.prepare_content("application/json")
+            luci.http.write_json(status_data)
+            return
+        end
     end
-    
+
+    -- 检查服务进程（优化版）
     local is_running = false
-    if pid then
-        is_running = (luci.sys.call(string.format("[ -d /proc/%d ]" , pid)) == 0)
+    
+    -- 首先检查PID文件
+    local pid_file = "/var/run/xiaoai-mqtt.pid"
+    if fs.access(pid_file) then
+        local pid = tonumber((fs.readfile(pid_file) or ""):match("%d+"))
+        if pid then
+            -- 检查进程是否存在（使用更高效的方法）
+            local proc_dir = "/proc/" .. pid
+            is_running = fs.access(proc_dir)
+        end
     end
     
+    -- 如果PID文件检查失败，回退到pgrep
     if not is_running then
         is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
     end
     
     response.service = is_running and "running" or "stopped"
 
-    -- 读取状态文件
+    -- 读取状态文件（使用缓存）
+    local status_cache = {}
     if fs.access("/var/run/xiaoai-mqtt.status") then
         local content = fs.readfile("/var/run/xiaoai-mqtt.status") or ""
-        response.mqtt = content:match("mqtt_connection=(%w+)") or "disconnected"
-        response.last_action = content:match("last_action=(.+)") or "N/A"
+        for line in content:gmatch("[^\r\n]+") do
+            local key, value = line:match("([^=]+)=(.+)")
+            if key and value then
+                status_cache[key] = value
+            end
+        end
+        
+        response.mqtt = status_cache.mqtt_connection or "disconnected"
+        response.last_action = status_cache.last_action or "N/A"
     end
 
-    -- 获取日志统计
-    response.log_stats = string.format("%d|%s",
-        tonumber(util.exec("wc -l /var/log/xiaoai-mqtt.log 2>/dev/null | awk '{print $1}'")) or 0,
-        util.exec("ls -lh /var/log/xiaoai-mqtt.log 2>/dev/null | awk '{print $5}'") or "0B"
-    )
+    -- 获取日志统计（优化版，减少系统调用）
+    local log_file = "/var/log/xiaoai-mqtt.log"
+    local lines = 0
+    local size = "0B"
+    
+    if fs.access(log_file) then
+        -- 获取文件大小
+        local stat = fs.stat(log_file)
+        if stat then
+            local bytes = stat.size
+            if bytes < 1024 then
+                size = string.format("%dB", bytes)
+            elseif bytes < 1024 * 1024 then
+                size = string.format("%.1fKB", bytes / 1024)
+            else
+                size = string.format("%.1fMB", bytes / (1024 * 1024))
+            end
+        end
+        
+        -- 获取行数（使用更高效的方法）
+        local file = io.open(log_file, "r")
+        if file then
+            local count = 0
+            for _ in file:lines() do
+                count = count + 1
+                if count > 10000 then  -- 限制最大行数检查
+                    break
+                end
+            end
+            lines = count
+            file:close()
+        end
+    end
+    
+    response.log_stats = string.format("%d|%s", lines, size)
+
+    -- 缓存结果
+    local json_data = util.json_encode(response)
+    luci.http.setcookie(cache_key, json_data, { path = "/" })
+    luci.http.setcookie(cache_time_key, tostring(current_time), { path = "/" })
 
     -- 输出 JSON
     luci.http.prepare_content("application/json")

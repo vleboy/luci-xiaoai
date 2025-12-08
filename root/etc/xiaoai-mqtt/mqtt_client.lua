@@ -85,17 +85,47 @@ local function write_log(msg)
     end
 end
 
--- 状态更新
+-- 状态更新（优化版）
+local last_status_update = {}
+local status_update_count = 0
+
 local function update_status(key, value)
-    local content = {}
+    -- 检查值是否真的改变了
+    if last_status_update[key] == value then
+        return
+    end
+    
+    last_status_update[key] = value
+    
     local fs = require "nixio.fs"
     local status_content = fs.readfile(STATUS_FILE) or ""
+    local content = {}
+    local updated = false
+    
     for line in status_content:gmatch("[^\r\n]+") do
-        if not line:match(key.."=") then table.insert(content, line) end
+        if line:match("^"..key.."=") then
+            table.insert(content, string.format("%s=%s", key, value))
+            updated = true
+        else
+            table.insert(content, line)
+        end
     end
-    table.insert(content, string.format("%s=%s", key, value))
-    fs.writefile(STATUS_FILE, table.concat(content, "\n"))
-    fs.chmod(STATUS_FILE, 644)
+    
+    if not updated then
+        table.insert(content, string.format("%s=%s", key, value))
+    end
+    
+    -- 限制状态文件写入频率（每10次更新写入一次，除非是关键状态）
+    status_update_count = status_update_count + 1
+    local should_write = (status_update_count % 10 == 0) or 
+                        (key == "mqtt_connection") or 
+                        (key == "service_status") or
+                        (key == "last_action")
+    
+    if should_write then
+        fs.writefile(STATUS_FILE, table.concat(content, "\n"))
+        fs.chmod(STATUS_FILE, 644)
+    end
 end
 
 -- WOL执行
@@ -194,12 +224,18 @@ end
 -- 处理订阅消息
 local function process_messages()
     local fs = require "nixio.fs"
-    local content = fs.readfile(SUB_OUTPUT_FILE) or ""
+    
+    -- 使用更高效的文件读取方式，只读取新内容
+    local file = io.open(SUB_OUTPUT_FILE, "r")
+    if not file then return end
+    
+    local content = file:read("*a")
+    file:close()
+    
     if content == "" then return end
     
-    -- 限制读取大小
-    content = content:sub(1, 4096)
-    fs.chmod(SUB_OUTPUT_FILE, 644)
+    -- 限制读取大小，防止内存占用过大
+    content = content:sub(1, 8192)  -- 增加到8KB，但限制最大读取
     
     -- 错误检测
     if content:find("Connection refused") then
@@ -211,33 +247,56 @@ local function process_messages()
         os.exit(1)
     end
     
+    -- 缓存配置，避免每次消息都读取UCI
+    local wol_config_cache = nil
+    local shutdown_config_cache = nil
+    
     -- 消息处理
+    local processed_count = 0
     for line in content:gmatch("[^\r\n]+") do
-        write_log("原始输出: "..line)
+        processed_count = processed_count + 1
+        if processed_count > 50 then  -- 限制单次处理的消息数量
+            write_log("警告：单次处理消息过多，跳过剩余消息")
+            break
+        end
+        
         local topic, payload = line:match("(%S+)%s+(.+)$")
         if topic and payload then
+            -- 延迟日志记录，减少I/O操作
+            local should_log = (processed_count <= 5)  -- 只记录前5条消息
+            
+            if should_log then
+                write_log("原始输出: "..line)
+            end
+            
             -- WOL处理
-            local wol_config = uci:get_all("xiaoai-mqtt", "wol") or {}
-            for _, trigger in ipairs(wol_config.on_msgs or {}) do
+            if not wol_config_cache then
+                wol_config_cache = uci:get_all("xiaoai-mqtt", "wol") or {}
+            end
+            
+            for _, trigger in ipairs(wol_config_cache.on_msgs or {}) do
                 if payload == trigger then
-                    execute_wol(wol_config.mac)
+                    execute_wol(wol_config_cache.mac)
                     break
                 end
             end
             
             -- 关机处理
-            local shutdown_config = uci:get_all("xiaoai-mqtt", "shutdown") or {}
-            for _, trigger in ipairs(shutdown_config.off_msgs or {}) do
+            if not shutdown_config_cache then
+                shutdown_config_cache = uci:get_all("xiaoai-mqtt", "shutdown") or {}
+            end
+            
+            for _, trigger in ipairs(shutdown_config_cache.off_msgs or {}) do
                 if payload == trigger then
-                    execute_shutdown(shutdown_config.ip, shutdown_config.user, shutdown_config.pass)
+                    execute_shutdown(shutdown_config_cache.ip, shutdown_config_cache.user, shutdown_config_cache.pass)
                     break
                 end
             end
         end
     end
     
-    -- 清空已处理内容
-    os.execute(">"..SUB_OUTPUT_FILE)
+    -- 清空已处理内容（使用truncate而不是重定向）
+    os.execute("truncate -s 0 "..SUB_OUTPUT_FILE)
 end
 
 -- 主循环

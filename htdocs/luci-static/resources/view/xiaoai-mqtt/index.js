@@ -121,10 +121,34 @@ return view.extend({
         o.default = '0';
         o.rmempty = true;
 
-        // 状态更新
-        poll.add(function() {
+        // 状态更新（优化版）
+        var lastStatus = {};
+        var updateInterval = 3000; // 初始3秒
+        var consecutiveErrors = 0;
+        var maxUpdateInterval = 30000; // 最大30秒
+        
+        function updateStatus() {
             return L.Request.get('/cgi-bin/luci/admin/services/xiaoai-mqtt/status').then(function(xhr) {
+                consecutiveErrors = 0;
                 var status = JSON.parse(xhr.responseText);
+                
+                // 检查状态是否真的改变了
+                var hasChanged = false;
+                if (lastStatus.service !== status.service || 
+                    lastStatus.mqtt !== status.mqtt ||
+                    lastStatus.last_action !== status.last_action ||
+                    lastStatus.log_stats !== status.log_stats) {
+                    hasChanged = true;
+                    lastStatus = Object.assign({}, status);
+                }
+                
+                // 如果没有变化且不是第一次更新，可以延长更新间隔
+                if (!hasChanged && updateInterval < maxUpdateInterval) {
+                    updateInterval = Math.min(updateInterval * 1.5, maxUpdateInterval);
+                } else if (hasChanged) {
+                    updateInterval = 3000; // 重置为3秒
+                }
+                
                 var serviceStatus = document.getElementById('service_status');
                 var mqttStatus = document.getElementById('mqtt_status');
                 var lastAction = document.getElementById('last_action');
@@ -199,8 +223,29 @@ return view.extend({
                         mqttControlBtn.className = 'cbi-button cbi-button-action';
                     }
                 }
+                
+                // 安排下一次更新
+                setTimeout(updateStatus, updateInterval);
+                
+            }).catch(function(err) {
+                consecutiveErrors++;
+                // 错误时增加更新间隔
+                updateInterval = Math.min(updateInterval * 2, maxUpdateInterval);
+                
+                // 显示错误状态
+                var mqttStatus = document.getElementById('mqtt_status');
+                if (mqttStatus) {
+                    mqttStatus.textContent = _('获取状态失败');
+                    mqttStatus.className = 'status-disconnected';
+                }
+                
+                // 安排下一次更新
+                setTimeout(updateStatus, updateInterval);
             });
-        });
+        }
+        
+        // 初始状态更新
+        setTimeout(updateStatus, 1000);
         
         // 添加按钮点击事件处理
         document.addEventListener('DOMContentLoaded', function() {

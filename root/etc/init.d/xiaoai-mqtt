@@ -16,35 +16,39 @@ start_service() {
         return 0
     fi
 
-    # 清理残留进程和文件
-    local pid=$(pgrep -f "/usr/bin/lua /etc/xiaoai-mqtt/mqtt_client.lua")
-    [ -n "$pid" ] && {
-        kill -TERM $pid 2>/dev/null
-        sleep 2
-    }
-    local sub_pid=$(pgrep -f "mosquitto_sub -h bemfa.com")
-    [ -n "$sub_pid" ] && kill -9 $sub_pid 2>/dev/null
+    # 清理残留进程和文件（优化版，减少系统调用）
+    # 使用更高效的进程查找方法
+    local pid_file="/var/run/xiaoai-mqtt.pid"
+    local sub_pid_file="/var/run/mosquitto_sub.pid"
     
-    rm -f /var/run/mosquitto_sub.pid /tmp/mosquitto_sub.out /var/run/xiaoai-mqtt.pid
-    # 添加权限验证日志
-    logger -t xiaoai-mqtt "验证安装目录权限: $(ls -ld /etc/xiaoai-mqtt)"
-    logger -t xiaoai-mqtt "验证主程序权限: $(ls -l /etc/xiaoai-mqtt/mqtt_client.lua)"
-    logger -t xiaoai-mqtt "验证状态脚本权限: $(ls -l /etc/xiaoai-mqtt/status.sh)"
-    rm -f /var/run/xiaoai-mqtt.status
+    # 如果存在PID文件，读取并终止进程
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
+    fi
+    
+    if [ -f "$sub_pid_file" ]; then
+        local sub_pid=$(cat "$sub_pid_file" 2>/dev/null)
+        [ -n "$sub_pid" ] && kill -9 "$sub_pid" 2>/dev/null
+    fi
+    
+    # 清理文件
+    rm -f /var/run/mosquitto_sub.pid /tmp/mosquitto_sub.out /var/run/xiaoai-mqtt.pid /var/run/xiaoai-mqtt.status
+    
+    # 创建状态文件
     touch /var/run/xiaoai-mqtt.status
     chmod 644 /var/run/xiaoai-mqtt.status
 
-    # 确保脚本和目录权限
-    chmod 755 /etc/xiaoai-mqtt
-    chmod 755 /etc/xiaoai-mqtt/mqtt_client.lua
-    chmod 755 /etc/xiaoai-mqtt/status.sh
+    # 设置权限（只在需要时）
+    [ ! -x "/etc/xiaoai-mqtt/mqtt_client.lua" ] && chmod 755 /etc/xiaoai-mqtt/mqtt_client.lua
+    [ ! -x "/etc/xiaoai-mqtt/status.sh" ] && chmod 755 /etc/xiaoai-mqtt/status.sh
 
-    # 创建日志文件并清理旧日志
-    touch /var/log/xiaoai-mqtt.log
+    # 创建日志文件
+    [ ! -f "/var/log/xiaoai-mqtt.log" ] && touch /var/log/xiaoai-mqtt.log
     chmod 644 /var/log/xiaoai-mqtt.log
     
-    # 清理旧的日志轮转文件（保留最近5个）
-    for i in {5..10}; do
+    # 清理旧的日志轮转文件（优化版，使用更高效的方法）
+    for i in 5 6 7 8 9 10; do
         [ -f "/var/log/xiaoai-mqtt.log.$i" ] && rm -f "/var/log/xiaoai-mqtt.log.$i"
     done
 
@@ -62,18 +66,13 @@ start_service() {
     procd_set_param env PATH=/usr/sbin:/usr/bin:/sbin:/bin
     procd_close_instance
 
-    # 添加启动后验证
-    sleep 2
-    [ -f /var/run/xiaoai-mqtt.pid ] && {
-        logger -t xiaoai-mqtt "服务启动成功 PID: $(cat /var/run/xiaoai-mqtt.pid)"
-    } || {
-        logger -t xiaoai-mqtt "错误：PID文件未生成，请检查执行权限"
-        ls -l /usr/bin/lua /etc/xiaoai-mqtt/mqtt_client.lua >> /var/log/xiaoai-mqtt.log
-    }
-    
-    # 检查必要依赖
-    which mosquitto_sub >/dev/null 2>&1 || logger -t xiaoai-mqtt "严重错误：未找到mosquitto_sub命令"
-    logger -t xiaoai-mqtt "Service started successfully with enhanced permissions"
+    # 添加启动后验证（减少日志记录）
+    sleep 1
+    if [ -f /var/run/xiaoai-mqtt.pid ]; then
+        logger -t xiaoai-mqtt "服务启动成功"
+    else
+        logger -t xiaoai-mqtt "警告：PID文件未生成"
+    fi
 }
 
 stop_service() {
