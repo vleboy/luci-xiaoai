@@ -11,7 +11,6 @@ PKG_CONFIG_DEPENDS:=CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_MQTT_SSL
 
 LUCI_TITLE:=XiaoAi MQTT Control Interface
 LUCI_DEPENDS:=+lua +mosquitto-client-ssl
-
 LUCI_PKGARCH:=all
 
 
