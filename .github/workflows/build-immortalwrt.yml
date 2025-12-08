@@ -60,17 +60,13 @@ jobs:
           fi
 
       - name: 复制插件源码到 SDK
-        working-directory: immortalwrt/package
         run: |
           # 创建插件目录
-          mkdir -p luci-app-xiaoai-mqtt
-          # 复制所有文件，排除 immortalwrt 和 .git 目录
-          cd $GITHUB_WORKSPACE
-          # 使用 rsync 更可靠地复制，排除特定目录
-          rsync -av --exclude='immortalwrt' --exclude='.git' . ../package/luci-app-xiaoai-mqtt/
-          # 确保在正确的目录
-          cd ../package/luci-app-xiaoai-mqtt
-          # 再次确认移除 .git 目录（如果存在）
+          mkdir -p immortalwrt/package/luci-app-xiaoai-mqtt
+          # 使用 rsync 复制所有文件，排除 immortalwrt 和 .git 目录
+          rsync -av --exclude='immortalwrt' --exclude='.git' $GITHUB_WORKSPACE/ immortalwrt/package/luci-app-xiaoai-mqtt/
+          # 进入插件目录并确认移除 .git 目录（如果存在）
+          cd immortalwrt/package/luci-app-xiaoai-mqtt
           rm -rf .git 2>/dev/null || true
 
       - name: 获取插件信息
