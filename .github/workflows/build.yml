@@ -1,0 +1,27 @@
+name: Build luci-app-xiaoai-mqtt
+
+on: [push, pull_request]
+env:
+  SDK_VERSION: 24.10.0
+  SDK_TARGET: x86/64
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y make gcc g++ libc6-dev libgcc-s1-dev liblua5.3-dev libmosquitto-dev libubus-1.0-dev
+
+    - name: Build package
+      run: make package
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: luci-app-xiaoai-mqtt-package
+        path: bin/packages/*

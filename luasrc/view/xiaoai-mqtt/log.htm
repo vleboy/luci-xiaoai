@@ -1,0 +1,78 @@
+<%+header%>
+<div class="cbi-map">
+    <h2><%:XiaoAi MQTT 日志管理%></h2>
+    
+    <!-- 统计信息 -->
+    <div class="cbi-section log-stats">
+        <h3><%:日志统计%></h3>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <span class="label"><%:文件大小%>:</span>
+                <span class="value"><%= luci.util.exec("ls -lh /var/log/xiaoai-mqtt.log 2>/dev/null | awk '{print $5}'") or "0B" %></span>
+            </div>
+            <div class="stat-item">
+                <span class="label"><%:日志条目%>:</span>
+                <span class="value"><%= luci.util.exec("wc -l /var/log/xiaoai-mqtt.log 2>/dev/null | awk '{print $1}'") or "0" %></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志内容 -->
+    <div class="cbi-section log-content">
+        <h3><%:实时日志%></h3>
+        <pre class="log-output">
+            <%= luci.sys.exec("tail -n 100 /var/log/xiaoai-mqtt.log") or "暂无日志内容..." %>
+        </pre>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="cbi-section log-actions">
+        <div class="cbi-page-actions">
+            <form class="inline" method="post" action="<%= url('admin/services/xiaoai-mqtt/clear_log') %>">
+                <button type="submit" class="cbi-button cbi-button-reset">
+                    🗑️ <%:清空日志%>
+                </button>
+            </form>
+            
+            <a class="cbi-button cbi-button-apply" 
+               href="<%= url('admin/services/xiaoai-mqtt/download_log') %>">
+                ⬇️ <%:下载日志%>
+            </a>
+        </div>
+    </div>
+</div>
+
+<link rel="stylesheet" href="<%=resource%>/view/xiaoai-mqtt/style.css">
+
+<script>
+// 自动刷新功能
+let autoRefresh = true;
+
+function refreshLog() {
+    if(autoRefresh) {
+        fetch('<%= luci.dispatcher.build_url("admin/services/xiaoai-mqtt/log") %>')
+            .then(r => r.text())
+            .then(html => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                document.querySelector('.log-output').innerHTML = 
+                    doc.querySelector('.log-output').innerHTML;
+                document.querySelector('.stats-grid').innerHTML = 
+                    doc.querySelector('.stats-grid').innerHTML;
+            });
+    }
+}
+
+// 每5秒刷新
+setInterval(refreshLog, 5000);
+
+// 鼠标悬停时暂停自动刷新
+document.querySelector('.log-output').addEventListener('mouseenter', () => {
+    autoRefresh = false;
+});
+document.querySelector('.log-output').addEventListener('mouseleave', () => {
+    autoRefresh = true;
+});
+</script>
+
+<%+footer%>

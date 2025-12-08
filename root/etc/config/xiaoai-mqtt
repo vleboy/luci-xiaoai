@@ -1,0 +1,23 @@
+config global 'status'
+
+config mqtt 'mqtt'
+	option mqtt_broker 'bemfa.com'
+	option mqtt_port '9501'
+	option mqtt_user ''
+    option mqtt_pass ''
+	option mqtt_client_id ''
+	option mqtt_topic ''
+
+config wol 'wol'
+	list on_msgs 'on'
+	option mac ''
+
+config shutdown 'shutdown'
+	list off_msgs 'off'
+	option ip ''
+	option user ''
+	option pass ''
+
+config service 'main'
+	option enabled '1'
+

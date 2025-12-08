@@ -1,0 +1,156 @@
+.service-status {
+    margin: 1em 0;
+    padding: 1.2em;
+    background: var(--color-bg-lighter, #f8f9fa);
+    border: 1px solid var(--color-border, #dee2e6);
+    border-radius: var(--border-radius, 4px);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* 日志管理样式 */
+.log-stats {
+    margin-bottom: 20px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    padding: 10px;
+    background: var(--color-bg-lighter, #f8f9fa);
+    border-radius: var(--border-radius, 4px);
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px;
+    background: var(--color-bg, white);
+    border: 1px solid var(--color-border, #dee2e6);
+    border-radius: var(--border-radius-sm, 3px);
+    transition: transform 0.2s ease;
+}
+
+.stat-item:hover {
+    transform: translateY(-2px);
+}
+
+.stat-item .label {
+    font-weight: bold;
+    color: var(--color-text, #495057);
+}
+
+.stat-item .value {
+    color: var(--color-text-secondary, #6c757d);
+}
+
+.log-content {
+    margin: 15px 0;
+}
+
+.log-output {
+    height: 300px;
+    padding: 15px;
+    background: var(--color-bg-dark, #1e1e1e);
+    color: var(--color-text-light, #d4d4d4);
+    border-radius: var(--border-radius, 4px);
+    overflow: auto;
+    font-family: Monaco, Consolas, monospace;
+    transition: background-color 0.3s ease;
+}
+
+.log-actions .cbi-page-actions {
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+.cbi-button-reset {
+    background-color: var(--color-error, #dc3545);
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.cbi-button-reset:hover {
+    background-color: var(--color-error-dark, #bb2d3b);
+    transform: translateY(-1px);
+}
+
+.service-status em {
+    display: block;
+    line-height: 1.8;
+    color: var(--color-text, #495057);
+    margin-bottom: 0.5em;
+}
+
+.service-status em:last-child {
+    margin-bottom: 0;
+}
+
+.service-status em b {
+    color: var(--color-success, #2b8a3e);
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.service-status em b.stopped {
+    color: var(--color-error, #c92a2a);
+}
+
+.mqtt-form {
+    margin-top: 2em;
+}
+
+.mqtt-form .cbi-value {
+    padding: 1em 0;
+    border-bottom: 1px solid var(--color-border-light, #e9ecef);
+}
+
+.mqtt-form .cbi-value:last-child {
+    border-bottom: none;
+}
+
+.mqtt-form .cbi-value-title {
+    width: 160px;
+    color: var(--color-text, #495057);
+    font-weight: 500;
+}
+
+.mqtt-form .cbi-value-field {
+    margin-left: 170px;
+}
+
+.mqtt-form input[type="text"],
+.mqtt-form input[type="password"] {
+    width: 100%;
+    max-width: 420px;
+    padding: 0.6em 0.8em;
+    border: 1px solid var(--color-border, #ced4da);
+    border-radius: var(--border-radius, 4px);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mqtt-form input[type="text"]:focus,
+.mqtt-form input[type="password"]:focus {
+    border-color: var(--color-primary, #228be6);
+    box-shadow: 0 0 0 2px rgba(34, 139, 230, 0.1);
+    outline: none;
+}
+
+.mqtt-form .cbi-button {
+    margin-top: 1.5em;
+    padding: 0.6em 1.2em;
+    background: var(--color-primary, #228be6);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius, 4px);
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.mqtt-form .cbi-button:hover {
+    background: var(--color-primary-dark, #1971c2);
+}
+
+.mqtt-form .cbi-button:active {
+    transform: translateY(1px);
+}
