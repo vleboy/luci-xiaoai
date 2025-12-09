@@ -131,15 +131,6 @@ return view.extend({
         o.placeholder = 'off';
         o.rmempty = true;
 
-        // 服务控制
-        s = m.section(form.NamedSection, 'main', 'service', _('服务控制'));
-        s.anonymous = true;
-        s.addremove = false;
-
-        o = s.option(form.Flag, 'enabled', _('启用服务'));
-        o.default = '0';
-        o.rmempty = true;
-
         // 状态更新函数
         function updateStatus() {
             var url = '/cgi-bin/luci/admin/services/xiaoai-mqtt/status';
@@ -151,27 +142,14 @@ return view.extend({
                     var status = JSON.parse(xhr.responseText);
                     
                     // 更新服务状态
-                    var serviceStatus = document.getElementById('service_status');
-                    if (serviceStatus) {
+                    updateElementStatus('service_status', function() {
                         var statusText = status.service === 'running' ? _('运行中') : _('已停止');
                         var statusClass = status.service === 'running' ? 'running' : 'stopped';
-                        
-                        // 移除spinning元素
-                        var spinning = serviceStatus.querySelector('.spinning');
-                        if (spinning) {
-                            serviceStatus.removeChild(spinning);
-                        }
-                        
-                        // 创建状态文本
-                        var statusSpan = document.createElement('span');
-                        statusSpan.textContent = statusText;
-                        statusSpan.className = statusClass;
-                        serviceStatus.appendChild(statusSpan);
-                    }
+                        return { text: statusText, className: statusClass };
+                    });
                     
                     // 更新MQTT状态
-                    var mqttStatus = document.getElementById('mqtt_status');
-                    if (mqttStatus) {
+                    updateElementStatus('mqtt_status', function() {
                         var statusText = '';
                         var statusClass = '';
                         switch(status.mqtt) {
@@ -187,58 +165,34 @@ return view.extend({
                                 statusText = _('重新连接中...');
                                 statusClass = 'status-reconnecting';
                                 break;
+                            case 'initializing':
+                                statusText = _('初始化中...');
+                                statusClass = 'status-connecting';
+                                break;
                             default:
                                 statusText = _('未连接');
                                 statusClass = 'status-disconnected';
                         }
-                        
-                        // 移除spinning元素
-                        var spinning = mqttStatus.querySelector('.spinning');
-                        if (spinning) {
-                            mqttStatus.removeChild(spinning);
-                        }
-                        
-                        // 创建状态文本
-                        var statusSpan = document.createElement('span');
-                        statusSpan.textContent = statusText;
-                        statusSpan.className = statusClass;
-                        mqttStatus.appendChild(statusSpan);
-                    }
+                        return { text: statusText, className: statusClass };
+                    });
                     
                     // 更新最近操作
-                    var lastAction = document.getElementById('last_action');
-                    if (lastAction) {
-                        // 移除spinning元素
-                        var spinning = lastAction.querySelector('.spinning');
-                        if (spinning) {
-                            lastAction.removeChild(spinning);
-                        }
-                        
-                        // 创建操作文本
-                        var actionSpan = document.createElement('span');
-                        actionSpan.textContent = status.last_action || _('无');
-                        lastAction.appendChild(actionSpan);
-                    }
+                    updateElementStatus('last_action', function() {
+                        return { text: status.last_action || _('无'), className: '' };
+                    });
                     
                     // 更新日志统计
-                    var logStats = document.getElementById('log_stats');
-                    if (logStats && status.log_stats) {
-                        // 移除spinning元素
-                        var spinning = logStats.querySelector('.spinning');
-                        if (spinning) {
-                            logStats.removeChild(spinning);
+                    updateElementStatus('log_stats', function() {
+                        if (status.log_stats) {
+                            var stats = status.log_stats.split('|');
+                            if (stats.length >= 2) {
+                                var lines = parseInt(stats[0]) || 0;
+                                var size = stats[1] || '0B';
+                                return { text: lines + ' 行 | ' + size, className: '' };
+                            }
                         }
-                        
-                        // 创建统计文本
-                        var stats = status.log_stats.split('|');
-                        if (stats.length >= 2) {
-                            var lines = parseInt(stats[0]) || 0;
-                            var size = stats[1] || '0B';
-                            var statsSpan = document.createElement('span');
-                            statsSpan.textContent = lines + ' 行 | ' + size;
-                            logStats.appendChild(statsSpan);
-                        }
-                    }
+                        return { text: _('无日志'), className: '' };
+                    });
                     
                     // 更新MQTT控制按钮
                     var mqttControlBtn = document.getElementById('mqtt_control_btn');
@@ -253,7 +207,7 @@ return view.extend({
                             mqttControlBtn.textContent = _('重新连接');
                             mqttControlBtn.disabled = false;
                             mqttControlBtn.className = 'cbi-button cbi-button-action';
-                        } else if (status.mqtt === 'connecting' || status.mqtt === 'reconnecting') {
+                        } else if (status.mqtt === 'connecting' || status.mqtt === 'reconnecting' || status.mqtt === 'initializing') {
                             mqttControlBtn.textContent = _('连接中...');
                             mqttControlBtn.disabled = true;
                             mqttControlBtn.className = 'cbi-button cbi-button-reset';
@@ -286,6 +240,11 @@ return view.extend({
                     
                 } catch (e) {
                     console.error('解析状态响应失败:', e);
+                    // 显示解析错误
+                    showErrorStatus('service_status', _('解析失败'));
+                    showErrorStatus('mqtt_status', _('解析失败'));
+                    showErrorStatus('last_action', _('解析失败'));
+                    showErrorStatus('log_stats', _('解析失败'));
                 }
                 
                 // 3秒后再次更新
@@ -295,28 +254,72 @@ return view.extend({
                 console.error('获取状态失败:', err);
                 
                 // 显示错误状态
-                var mqttStatus = document.getElementById('mqtt_status');
-                if (mqttStatus) {
-                    var spinning = mqttStatus.querySelector('.spinning');
-                    if (spinning) {
-                        mqttStatus.removeChild(spinning);
-                    }
-                    var errorSpan = document.createElement('span');
-                    errorSpan.textContent = _('获取失败');
-                    errorSpan.className = 'status-disconnected';
-                    mqttStatus.appendChild(errorSpan);
-                }
+                showErrorStatus('service_status', _('获取失败'));
+                showErrorStatus('mqtt_status', _('获取失败'));
+                showErrorStatus('last_action', _('获取失败'));
+                showErrorStatus('log_stats', _('获取失败'));
                 
                 // 5秒后重试
                 setTimeout(updateStatus, 5000);
             });
         }
         
-        // 页面加载完成后开始更新状态和添加按钮点击事件处理
-        document.addEventListener('DOMContentLoaded', function() {
-            // 延迟1秒开始更新，确保DOM完全加载
-            setTimeout(updateStatus, 1000);
-
+        // 辅助函数：更新元素状态
+        function updateElementStatus(elementId, getStatusInfo) {
+            var element = document.getElementById(elementId);
+            if (element) {
+                // 移除spinning元素
+                var spinning = element.querySelector('.spinning');
+                if (spinning) {
+                    element.removeChild(spinning);
+                }
+                
+                // 清除现有内容
+                while (element.firstChild) {
+                    element.removeChild(element.firstChild);
+                }
+                
+                // 获取状态信息
+                var statusInfo = getStatusInfo();
+                if (statusInfo) {
+                    var statusSpan = document.createElement('span');
+                    statusSpan.textContent = statusInfo.text;
+                    if (statusInfo.className) {
+                        statusSpan.className = statusInfo.className;
+                    }
+                    element.appendChild(statusSpan);
+                }
+            }
+        }
+        
+        // 辅助函数：显示错误状态
+        function showErrorStatus(elementId, errorText) {
+            var element = document.getElementById(elementId);
+            if (element) {
+                // 移除spinning元素
+                var spinning = element.querySelector('.spinning');
+                if (spinning) {
+                    element.removeChild(spinning);
+                }
+                
+                // 清除现有内容
+                while (element.firstChild) {
+                    element.removeChild(element.firstChild);
+                }
+                
+                // 创建错误文本
+                var errorSpan = document.createElement('span');
+                errorSpan.textContent = errorText;
+                errorSpan.className = 'status-disconnected';
+                element.appendChild(errorSpan);
+            }
+        }
+        
+        // 初始化状态更新和按钮事件处理
+        function initStatusUpdate() {
+            // 立即开始更新状态
+            updateStatus();
+            
             // MQTT控制按钮事件处理
             var mqttControlBtn = document.getElementById('mqtt_control_btn');
             if (mqttControlBtn) {
@@ -410,6 +413,12 @@ return view.extend({
             setupServiceControlButton('start_service_btn', 'start', _('启动成功'));
             setupServiceControlButton('stop_service_btn', 'stop', _('停止成功'));
             setupServiceControlButton('restart_service_btn', 'restart', _('重启成功'));
+        }
+
+        // 在页面渲染完成后初始化
+        window.addEventListener('load', function() {
+            // 延迟500ms确保DOM完全加载
+            setTimeout(initStatusUpdate, 500);
         });
 
         return m.render();

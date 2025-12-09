@@ -69,6 +69,15 @@ end
 s = m:section(SimpleSection, nil, translate("服务状态"))
 s.template = "xiaoai-mqtt/status"
 
+-- 服务控制
+s = m:section(NamedSection, "main", "service", translate("服务控制"))
+s.anonymous = true
+s.addremove = false
+
+local enabled = s:option(Flag, "enabled", translate("启用服务"))
+enabled.default = 1
+enabled.rmempty = false
+
 -- MQTT配置
 s = m:section(NamedSection, "mqtt", "mqtt", translate("MQTT参数"))
 s.anonymous = true
