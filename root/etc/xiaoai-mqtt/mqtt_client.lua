@@ -303,30 +303,40 @@ local function main_loop()
     -- 更新服务状态
     update_status("service_status", "running")
     update_status("mqtt_connection", "connecting")
+    
     while true do
-        if not is_process_alive(pid) then
-            -- 清理旧进程
-            if pid then
-                write_log(string.format("进程 %d 已终止，等待重启...", pid))
-                os.execute("kill -9 "..pid.." 2>/dev/null")
-                os.remove(SUB_PID_FILE)
-            end
-            
-            -- 启动新进程
-            pid = start_mosquitto_sub()
-            if not pid then
-                reconnect_delay = math.min(reconnect_delay * 2, 300)
-                nixio.nanosleep(reconnect_delay)
+        local success, err = pcall(function()
+            if not is_process_alive(pid) then
+                -- 清理旧进程
+                if pid then
+                    write_log(string.format("进程 %d 已终止，等待重启...", pid))
+                    os.execute("kill -9 "..pid.." 2>/dev/null")
+                    os.remove(SUB_PID_FILE)
+                end
+                
+                -- 启动新进程
+                pid = start_mosquitto_sub()
+                if not pid then
+                    reconnect_delay = math.min(reconnect_delay * 2, 300)
+                    write_log(string.format("启动进程失败，等待 %d 秒后重试...", reconnect_delay))
+                    nixio.nanosleep(reconnect_delay)
+                else
+                    write_log(string.format("进程启动成功 PID: %d", pid))
+                    reconnect_delay = 5
+                end
             else
-                write_log(string.format("进程启动成功 PID: %d", pid))
-                reconnect_delay = 5
+                -- 处理消息
+                process_messages()
+                update_status("mqtt_connection", "connected") 
+                nixio.nanosleep(3)
+                update_status("service_heartbeat", os.date("%Y-%m-%d %H:%M:%S"))
             end
-        else
-            -- 处理消息
-            process_messages()
-            update_status("mqtt_connection", "connected") 
-            nixio.nanosleep(3)
-            update_status("service_heartbeat", os.date("%Y-%m-%d %H:%M:%S"))
+        end)
+        
+        if not success then
+            write_log("主循环错误: " .. tostring(err))
+            write_log("等待 10 秒后继续...")
+            nixio.nanosleep(10)
         end
     end
 end
@@ -350,13 +360,23 @@ end
 local function write_pid_file()
     local pid = nixio.getpid()
     local fs = require "nixio.fs"
-    if fs.writefile(PID_FILE, tostring(pid)) then
+    
+    -- 确保目录存在
+    local dir = "/var/run"
+    if not fs.access(dir) then
+        fs.mkdir(dir)
+    end
+    
+    -- 尝试写入PID文件
+    local success = fs.writefile(PID_FILE, tostring(pid))
+    if success then
         fs.chmod(PID_FILE, 644)
         write_log(string.format("已写入PID文件: %d", pid))
         return true
+    else
+        write_log("无法写入PID文件，路径: " .. PID_FILE)
+        return false
     end
-    write_log("无法写入PID文件")
-    return false
 end
 
 local function cleanup()
