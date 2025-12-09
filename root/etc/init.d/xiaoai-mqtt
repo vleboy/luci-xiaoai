@@ -59,7 +59,7 @@ start_service() {
 
     # 注册服务进程
     procd_open_instance
-    procd_set_param command /usr/bin/lua "/etc/xiaoai-mqtt/mqtt_client.lua"
+    procd_set_param command lua "/etc/xiaoai-mqtt/mqtt_client.lua"
     procd_set_param respawn
     procd_set_param respawn_threshold 3600
     procd_set_param respawn_timeout 5
@@ -97,7 +97,7 @@ stop_service() {
     logger -t xiaoai-mqtt "=========================================="
 
     # 终止主进程
-    local pid=$(pgrep -f "/usr/bin/lua /etc/xiaoai-mqtt/mqtt_client.lua")
+    local pid=$(pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua")
     if [ -n "$pid" ]; then
         logger -t xiaoai-mqtt "终止主进程 PID: $pid"
         kill -TERM $pid 2>/dev/null
@@ -131,7 +131,27 @@ stop_service() {
 }
 
 reload_service() {
+    # 记录重新加载日志
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    logger -t xiaoai-mqtt "=========================================="
+    logger -t xiaoai-mqtt "XiaoAi MQTT 服务重新加载开始 - $timestamp"
+    logger -t xiaoai-mqtt "=========================================="
+    
     # 使用HUP信号触发日志轮转
-    local pid=$(pgrep -f "/usr/bin/lua /etc/xiaoai-mqtt/mqtt_client.lua")
-    [ -n "$pid" ] && kill -HUP $pid
+    local pid=$(pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua")
+    if [ -n "$pid" ]; then
+        logger -t xiaoai-mqtt "找到服务进程 PID: $pid，发送HUP信号"
+        kill -HUP $pid
+        logger -t xiaoai-mqtt "HUP信号已发送"
+    else
+        logger -t xiaoai-mqtt "警告：未找到服务进程，无法发送HUP信号"
+        logger -t xiaoai-mqtt "调试信息：pgrep模式为 'lua /etc/xiaoai-mqtt/mqtt_client.lua'"
+        logger -t xiaoai-mqtt "可能原因：服务未运行或pgrep模式不匹配"
+    fi
+    
+    # 记录重新加载完成日志
+    local end_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    logger -t xiaoai-mqtt "=========================================="
+    logger -t xiaoai-mqtt "XiaoAi MQTT 服务重新加载完成 - $end_timestamp"
+    logger -t xiaoai-mqtt "=========================================="
 }

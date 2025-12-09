@@ -188,29 +188,26 @@ local function start_mosquitto_sub()
     
     write_log("启动命令: "..cmd:gsub(" -P '%S+'", "")) -- 安全过滤
     local handle = io.popen(cmd)
-local output = handle:read("*a")
-handle:close()
-write_log("启动命令输出: "..(output or "无输出"))
+    local output = handle:read("*a")
+    handle:close()
+    write_log("启动命令输出: "..(output or "无输出"))
     
--- 获取PID
-local pid = nil
-local function get_pid_from_output(output)
-    local pattern = "%d+"
-    local pid_str = string.match(output, pattern)
-    if pid_str then
-        pid = tonumber(pid_str)
+    -- 获取PID
+    local pid = nil
+    local function get_pid_from_output(output)
+        local pattern = "%d+"
+        local pid_str = string.match(output, pattern)
+        if pid_str then
+            pid = tonumber(pid_str)
+        end
     end
-end
-get_pid_from_output(output)
-if not pid then
-    write_log("错误: 无法获取PID，请检查权限")
-    return nil
-end
+    get_pid_from_output(output)
     
     if not pid then
         write_log("错误: 无法获取PID，请检查权限")
         return nil
     end
+    
     return pid
 end
 
