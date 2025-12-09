@@ -404,8 +404,8 @@ local function register_signal_handlers()
     end)
     
     if not success then
-        write_log("无法注册SIGHUP函数处理，使用字符串处理: " .. tostring(err))
-        nixio.signal(1, "handle")
+        write_log("无法注册SIGHUP函数处理，使用默认处理: " .. tostring(err))
+        nixio.signal(1, "dfl")  -- 使用默认处理而不是无效的"handle"
     else
         write_log("SIGHUP信号处理函数注册成功")
     end
