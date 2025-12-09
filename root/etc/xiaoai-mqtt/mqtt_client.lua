@@ -387,7 +387,8 @@ _G.handle_signal = function(sig)
         write_log("收到重新连接信号(SIGHUP)，重新启动MQTT连接...")
         -- 更新状态为重新连接中
         update_status("mqtt_connection", "reconnecting")
-        -- 这里我们不需要清理，主循环会检测到进程终止并重新启动
+        -- 调用强制重新连接函数
+        force_reconnect()
     else
         write_log(string.format("收到信号 %d，执行清理...", sig))
         cleanup()
@@ -395,14 +396,29 @@ _G.handle_signal = function(sig)
     end
 end
 
--- 注册信号处理
-nixio.signal(15, "ign")  -- SIGTERM:忽略信号
-nixio.signal(2, "ign")   -- SIGINT:忽略信号
-nixio.signal(1, _G.handle_signal)   -- SIGHUP:调用处理函数
+-- 注册信号处理 - 尝试使用函数，如果失败则使用字符串
+local function register_signal_handlers()
+    -- 尝试注册SIGHUP处理函数
+    local success, err = pcall(function()
+        nixio.signal(1, _G.handle_signal)
+    end)
+    
+    if not success then
+        write_log("无法注册SIGHUP函数处理，使用字符串处理: " .. tostring(err))
+        nixio.signal(1, "handle")
+    else
+        write_log("SIGHUP信号处理函数注册成功")
+    end
+    
+    -- 其他信号使用字符串处理
+    nixio.signal(15, "ign")  -- SIGTERM:忽略信号
+    nixio.signal(2, "ign")   -- SIGINT:忽略信号
+end
 
 -- 服务入口
 write_log("====== 服务初始化开始 ======")
 write_pid_file()
+register_signal_handlers()
 update_status("service_status", "running")
 local ok, err = pcall(main_loop)
 cleanup()
