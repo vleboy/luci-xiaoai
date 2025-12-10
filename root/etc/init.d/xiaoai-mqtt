@@ -72,15 +72,41 @@ start_service() {
     procd_close_instance
     logger -t xiaoai-mqtt "注册服务进程完成"
 
-    # 添加启动后验证（减少日志记录）
-    sleep 1
-    if [ -f /var/run/xiaoai-mqtt.pid ]; then
-        logger -t xiaoai-mqtt "服务启动成功"
-        echo "last_action=服务启动成功" >> /var/run/xiaoai-mqtt.status
-    else
-        logger -t xiaoai-mqtt "警告：PID文件未生成"
-        echo "last_action=服务启动失败" >> /var/run/xiaoai-mqtt.status
-    fi
+    # 添加启动后验证（增加等待时间并改进检查）
+    local wait_count=0
+    local max_wait=5  # 最大等待5秒
+    
+    while [ $wait_count -lt $max_wait ]; do
+        sleep 1
+        if [ -f /var/run/xiaoai-mqtt.pid ]; then
+            # 检查PID文件是否有效（包含数字）
+            local pid=$(cat /var/run/xiaoai-mqtt.pid 2>/dev/null)
+            if [ -n "$pid" ] && [ "$pid" -eq "$pid" ] 2>/dev/null; then
+                logger -t xiaoai-mqtt "服务启动成功，PID: $pid"
+                echo "last_action=服务启动成功" >> /var/run/xiaoai-mqtt.status
+                break
+            else
+                logger -t xiaoai-mqtt "警告：PID文件存在但内容无效"
+            fi
+        fi
+        
+        wait_count=$((wait_count + 1))
+        
+        if [ $wait_count -eq $max_wait ]; then
+            logger -t xiaoai-mqtt "警告：PID文件未生成（等待超时）"
+            echo "last_action=服务启动失败" >> /var/run/xiaoai-mqtt.status
+            
+            # 尝试检查进程是否在运行（即使没有PID文件）
+            local running_pid=$(pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua")
+            if [ -n "$running_pid" ]; then
+                logger -t xiaoai-mqtt "调试：发现运行中的进程 PID: $running_pid"
+                # 尝试手动创建PID文件
+                echo "$running_pid" > /var/run/xiaoai-mqtt.pid
+                chmod 644 /var/run/xiaoai-mqtt.pid
+                logger -t xiaoai-mqtt "已手动创建PID文件"
+            fi
+        fi
+    done
     
     # 记录初始化完成日志
     local end_timestamp=$(date '+%Y-%m-%d %H:%M:%S')

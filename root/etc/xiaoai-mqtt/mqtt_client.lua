@@ -437,7 +437,10 @@ end
 
 -- 服务入口
 write_log("====== 服务初始化开始 ======")
-write_pid_file()
+if not write_pid_file() then
+    write_log("错误：无法写入PID文件，服务启动失败")
+    os.exit(1)
+end
 register_signal_handlers()
 update_status("service_status", "running")
 local ok, err = pcall(main_loop)
