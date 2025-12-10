@@ -1,5 +1,39 @@
-local uci = require "luci.model.uci".cursor()
-local nixio = require "nixio"  -- 加载 nixio 库
+-- 服务入口
+-- 首先输出到标准错误，确保即使日志系统有问题也能看到
+io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
+io.stderr:write(string.format("[%s] 调试：Lua脚本开始执行\n", os.date("%Y-%m-%d %H:%M:%S")))
+
+-- 立即输出到标准错误，确保能看到
+io.stderr:write(string.format("[%s] 调试：加载nixio库\n", os.date("%Y-%m-%d %H:%M:%S")))
+
+-- 尝试加载nixio库
+local nixio_loaded, nixio = pcall(require, "nixio")
+if not nixio_loaded then
+    io.stderr:write(string.format("[%s] 错误：无法加载nixio库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(nixio)))
+    os.exit(1)
+end
+
+io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+
+-- 尝试加载uci库
+io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
+local uci_loaded, uci_result = pcall(require, "luci.model.uci")
+local uci
+if uci_loaded then
+    uci = uci_result.cursor()
+    io.stderr:write(string.format("[%s] 调试：uci库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+else
+    io.stderr:write(string.format("[%s] 警告：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
+    io.stderr:write(string.format("[%s] 调试：使用备用配置读取方法\n", os.date("%Y-%m-%d %H:%M:%S")))
+    -- 创建简单的uci模拟对象
+    uci = {
+        get_all = function(self, config, section)
+            io.stderr:write(string.format("[%s] 调试：读取配置 %s.%s\n", os.date("%Y-%m-%d %H:%M:%S"), config, section))
+            -- 返回空配置，避免崩溃
+            return {}
+        end
+    }
+end
 
 -- 定义 os.capture 函数（用于执行命令并捕获输出）
 function os.capture(cmd, raw)
@@ -519,10 +553,21 @@ end
 io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
 io.stderr:write(string.format("[%s] 调试：Lua脚本开始执行\n", os.date("%Y-%m-%d %H:%M:%S")))
 
+-- 立即输出到标准错误，确保能看到
+io.stderr:write(string.format("[%s] 调试：加载nixio库\n", os.date("%Y-%m-%d %H:%M:%S")))
+
+-- 尝试加载nixio库
+local nixio_loaded, nixio = pcall(require, "nixio")
+if not nixio_loaded then
+    io.stderr:write(string.format("[%s] 错误：无法加载nixio库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(nixio)))
+    os.exit(1)
+end
+
+io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+
 write_log("====== 服务初始化开始 ======")
 
 -- 调试：记录当前工作目录和用户信息
-local nixio = require "nixio"
 write_log(string.format("当前进程ID: %d", nixio.getpid()))
 write_log(string.format("当前用户ID: %d", nixio.getuid()))
 write_log(string.format("当前工作目录: %s", os.getenv("PWD") or "未知"))

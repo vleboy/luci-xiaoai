@@ -59,7 +59,8 @@ start_service() {
 
     # 注册服务进程
     procd_open_instance
-    procd_set_param command lua "/etc/xiaoai-mqtt/mqtt_client.lua"
+    # 使用绝对路径的lua解释器，并添加调试输出
+    procd_set_param command /usr/bin/lua "/etc/xiaoai-mqtt/mqtt_client.lua"
     procd_set_param respawn
     procd_set_param respawn_threshold 3600
     procd_set_param respawn_timeout 5
@@ -69,8 +70,19 @@ start_service() {
     procd_set_param pidfile "/var/run/xiaoai-mqtt.pid"
     # 设置环境变量，确保脚本能够正确访问系统资源
     procd_set_param env PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    procd_set_param env LUA_PATH="/usr/lib/lua/?.lua;/usr/lib/lua/?/init.lua"
+    procd_set_param env LUA_CPATH="/usr/lib/lua/?.so"
     procd_close_instance
     logger -t xiaoai-mqtt "注册服务进程完成"
+    
+    # 调试：尝试直接运行Lua脚本查看输出
+    logger -t xiaoai-mqtt "调试：尝试直接运行Lua脚本..."
+    local debug_output=$(/usr/bin/lua /etc/xiaoai-mqtt/mqtt_client.lua 2>&1 | head -c 500)
+    if [ -n "$debug_output" ]; then
+        logger -t xiaoai-mqtt "调试输出（前500字符）: $debug_output"
+    else
+        logger -t xiaoai-mqtt "调试：Lua脚本无输出（可能立即退出）"
+    fi
 
     # 添加启动后验证（增加等待时间并改进检查）
     local wait_count=0
