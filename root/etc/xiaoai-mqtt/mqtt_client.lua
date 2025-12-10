@@ -25,8 +25,38 @@ local PID_FILE = "/var/run/xiaoai-mqtt.pid"
 local LOG_MAX_SIZE = 1024 * 1024  -- 1MB
 local LOG_MAX_FILES = 5
 
--- 日志轮转函数
-local function rotate_log_if_needed()
+-- 删除旧的rotate_log_if_needed函数，使用新的rotate_log函数代替
+
+-- 简单的日志记录函数（避免递归调用）
+local function write_log(msg)
+    local fs = require "nixio.fs"
+    
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local log_message = string.format("[%s] %s\n", timestamp, msg)
+    
+    -- 直接写入日志文件，不调用轮转函数（避免递归）
+    local pcall_success, write_result = pcall(function()
+        return fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
+    end)
+    
+    if not pcall_success or not write_result then
+        -- 如果写入失败，尝试创建日志文件
+        local create_pcall_success, create_write_result = pcall(function()
+            -- 先尝试创建空文件
+            fs.writefile("/var/log/xiaoai-mqtt.log", "")
+            -- 然后写入日志
+            return fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
+        end)
+        
+        if not create_pcall_success or not create_write_result then
+            -- 如果还是失败，输出到标准错误（最后的手段）
+            io.stderr:write(string.format("[%s] 日志写入失败: %s\n", timestamp, msg))
+        end
+    end
+end
+
+-- 独立的日志轮转函数（不调用write_log）
+local function rotate_log()
     local fs = require "nixio.fs"
     local log_file = "/var/log/xiaoai-mqtt.log"
     
@@ -40,8 +70,10 @@ local function rotate_log_if_needed()
         return
     end
     
-    -- 执行轮转
-    write_log("日志文件达到限制，开始轮转...")
+    -- 执行轮转（不调用write_log，直接操作）
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local rotate_msg = string.format("[%s] 日志文件达到限制，开始轮转...\n", timestamp)
+    fs.writefile(log_file, rotate_msg, true)
     
     -- 删除最旧的日志文件
     local oldest_log = string.format("%s.%d", log_file, LOG_MAX_FILES - 1)
@@ -66,24 +98,23 @@ local function rotate_log_if_needed()
     fs.writefile(log_file, "")
     fs.chmod(log_file, 644)
     
-    write_log("日志轮转完成")
+    local complete_msg = string.format("[%s] 日志轮转完成\n", timestamp)
+    fs.writefile(log_file, complete_msg, true)
 end
 
--- 日志记录
-local function write_log(msg)
-    local fs = require "nixio.fs"
-    
-    -- 检查是否需要轮转
-    rotate_log_if_needed()
-    
-    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-    local log_message = string.format("[%s] %s\n", timestamp, msg)
-    fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
-    if not fs.chmod("/var/log/xiaoai-mqtt.log", 644) then
-        log_message = string.format("Failed to chmod log file: %s", "/var/log/xiaoai-mqtt.log")
-        fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
+-- 检查并执行日志轮转（在适当的时候调用）
+local function check_and_rotate_log()
+    -- 每100次日志写入检查一次轮转
+    local rotate_counter = 0
+    return function()
+        rotate_counter = rotate_counter + 1
+        if rotate_counter % 100 == 0 then
+            rotate_log()
+        end
     end
 end
+
+local check_log_rotation = check_and_rotate_log()
 
 -- 状态更新（优化版）
 local last_status_update = {}
@@ -361,20 +392,57 @@ local function write_pid_file()
     local pid = nixio.getpid()
     local fs = require "nixio.fs"
     
+    write_log(string.format("开始写入PID文件，当前PID: %d", pid))
+    write_log(string.format("PID文件路径: %s", PID_FILE))
+    
     -- 确保目录存在
     local dir = "/var/run"
     if not fs.access(dir) then
-        fs.mkdir(dir)
+        write_log("目录 /var/run 不存在，尝试创建...")
+        local mkdir_success, mkdir_err = pcall(function()
+            fs.mkdir(dir)
+        end)
+        if mkdir_success then
+            write_log("目录创建成功")
+        else
+            write_log("目录创建失败: " .. tostring(mkdir_err))
+        end
+    else
+        write_log("目录 /var/run 已存在")
+    end
+    
+    -- 检查目录权限
+    local dir_stat = fs.stat(dir)
+    if dir_stat then
+        write_log(string.format("目录权限: %o", dir_stat.mode))
     end
     
     -- 尝试写入PID文件
-    local success = fs.writefile(PID_FILE, tostring(pid))
-    if success then
+    write_log("尝试写入PID文件...")
+    local pcall_success, write_result = pcall(function()
+        return fs.writefile(PID_FILE, tostring(pid))
+    end)
+    
+    if pcall_success and write_result then  -- pcall成功且writefile返回true
         fs.chmod(PID_FILE, 644)
-        write_log(string.format("已写入PID文件: %d", pid))
-        return true
+        write_log(string.format("PID文件写入成功: %d", pid))
+        
+        -- 验证文件是否真的存在
+        if fs.access(PID_FILE) then
+            local file_content = fs.readfile(PID_FILE) or ""
+            write_log(string.format("验证PID文件内容: %s", file_content))
+            return true
+        else
+            write_log("警告：PID文件写入成功但文件不存在")
+            return false
+        end
     else
-        write_log("无法写入PID文件，路径: " .. PID_FILE)
+        if not pcall_success then
+            write_log("无法写入PID文件，pcall错误: " .. tostring(write_result))
+        else
+            write_log("无法写入PID文件，writefile返回false")
+        end
+        write_log("路径: " .. PID_FILE)
         return false
     end
 end
@@ -436,16 +504,22 @@ local function register_signal_handlers()
 end
 
 -- 服务入口
+-- 首先输出到标准错误，确保即使日志系统有问题也能看到
+io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
 write_log("====== 服务初始化开始 ======")
 if not write_pid_file() then
+    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
     write_log("错误：无法写入PID文件，服务启动失败")
     os.exit(1)
 end
+io.stderr:write(string.format("[%s] PID文件写入成功，注册信号处理\n", os.date("%Y-%m-%d %H:%M:%S")))
 register_signal_handlers()
 update_status("service_status", "running")
+io.stderr:write(string.format("[%s] 进入主循环\n", os.date("%Y-%m-%d %H:%M:%S")))
 local ok, err = pcall(main_loop)
 cleanup()
 if not ok then
+    io.stderr:write(string.format("[%s] 服务异常退出: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
     write_log(string.format("服务异常退出: %s", tostring(err)))
     os.exit(1)
 end
