@@ -621,3 +621,10 @@ local function register_signal_handlers()
     nixio.signal(15, _G.handle_signal)  -- SIGTERM: 终止信号
     nixio.signal(2, _G.handle_signal)   -- SIGINT: 中断信号
 end
+
+-- 初始化并运行
+write_log("正在注册信号处理...")
+register_signal_handlers()
+
+write_log("进入主循环...")
+main_loop()
