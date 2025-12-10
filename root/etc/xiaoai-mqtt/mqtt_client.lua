@@ -15,46 +15,6 @@ end
 
 io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
 
-
--- 立即写入PID文件
-write_log("开始尝试写入PID文件...")
-local pid_result = write_pid_file()
-if not pid_result then
-    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
-    write_log("错误：无法写入PID文件，服务启动失败")
-    os.exit(1)
-end
-
-io.stderr:write(string.format("[%s] PID文件写入成功\n", os.date("%Y-%m-%d %H:%M:%S")))
-write_log("PID文件写入成功")
-
--- 尝试加载uci库
-io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
-local uci_loaded, uci_result = pcall(require, "luci.model.uci")
-local uci
-if uci_loaded then
-    uci = uci_result.cursor()
-    io.stderr:write(string.format("[%s] 调试：uci库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
-else
-    io.stderr:write(string.format("[%s] 错误：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
-    io.stderr:write(string.format("[%s] 错误：UCI库是必需的，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
-    os.exit(1) -- 如果UCI库无法加载，则退出
-end
-
--- 定义 os.capture 函数（用于执行命令并捕获输出）
-function os.capture(cmd, raw)
-    local f, err = io.popen(cmd, 'r')
-    if not f then return nil, err end
-    local s, err = f:read('*a')
-    f:close()
-    if not s then return nil, err end
-    if raw then return s end
-    s = string.gsub(s, '^%s+', '')
-    s = string.gsub(s, '%s+$', '')
-    s = string.gsub(s, '[\n\r]+', ' ')
-    return s
-end
-
 -- 常量定义
 local LOG_FILE = "/var/log/xiaoai-mqtt.log"
 local STATUS_FILE = "/var/run/xiaoai-mqtt.status"
@@ -62,12 +22,9 @@ local SUB_PID_FILE = "/var/run/mosquitto_sub.pid"
 local SUB_OUTPUT_FILE = "/tmp/mosquitto_sub.out"
 local PID_FILE = "/var/run/xiaoai-mqtt.pid"
 
-
 -- 日志轮转配置
 local LOG_MAX_SIZE = 1024 * 1024  -- 1MB
 local LOG_MAX_FILES = 5
-
--- 删除旧的rotate_log_if_needed函数，使用新的rotate_log函数代替
 
 -- 简单的日志记录函数（避免递归调用）
 local function write_log(msg)
@@ -158,6 +115,116 @@ local function check_and_rotate_log()
 end
 
 local check_log_rotation = check_and_rotate_log()
+
+-- 写入PID文件
+local function write_pid_file()
+    local pid = nixio.getpid()
+    local fs = require "nixio.fs"
+    
+    -- 检查pid是否有效
+    if not pid then
+        write_log("错误：无法获取进程ID")
+        return false
+    end
+    
+    write_log(string.format("开始写入PID文件，当前PID: %d", pid))
+    write_log(string.format("PID文件路径: %s", PID_FILE))
+    
+    -- 确保目录存在
+    local dir = "/var/run"
+    if not fs.access(dir) then
+        write_log("目录 /var/run 不存在，尝试创建...")
+        local mkdir_success, mkdir_err = pcall(function()
+            fs.mkdir(dir)
+        end)
+        if mkdir_success then
+            write_log("目录创建成功")
+        else
+            write_log("目录创建失败: " .. tostring(mkdir_err))
+        end
+    else
+        write_log("目录 /var/run 已存在")
+    end
+    
+    -- 检查目录权限（安全地处理可能为nil的mode）
+    local dir_stat = fs.stat(dir)
+    if dir_stat then
+        local mode = dir_stat.mode
+        if mode then
+            write_log(string.format("目录权限: %o", mode))
+        else
+            write_log("目录权限: 无法获取权限信息")
+        end
+    end
+    
+    -- 尝试写入PID文件
+    write_log("尝试写入PID文件...")
+    local pcall_success, write_result = pcall(function()
+        return fs.writefile(PID_FILE, tostring(pid))
+    end)
+    
+    if pcall_success and write_result then  -- pcall成功且writefile返回true
+        fs.chmod(PID_FILE, 644)
+        write_log(string.format("PID文件写入成功: %d", pid))
+        
+        -- 验证文件是否真的存在
+        if fs.access(PID_FILE) then
+            local file_content = fs.readfile(PID_FILE) or ""
+            write_log(string.format("验证PID文件内容: %s", file_content))
+            return true
+        else
+            write_log("警告：PID文件写入成功但文件不存在")
+            return false
+        end
+    else
+        if not pcall_success then
+            write_log("无法写入PID文件，pcall错误: " .. tostring(write_result))
+        else
+            write_log("无法写入PID文件，writefile返回false")
+        end
+        write_log("路径: " .. PID_FILE)
+        return false
+    end
+end
+
+-- 立即写入PID文件
+write_log("开始尝试写入PID文件...")
+local pid_result = write_pid_file()
+if not pid_result then
+    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
+    write_log("错误：无法写入PID文件，服务启动失败")
+    os.exit(1)
+end
+
+io.stderr:write(string.format("[%s] PID文件写入成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+write_log("PID文件写入成功")
+
+-- 尝试加载uci库
+io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
+local uci_loaded, uci_result = pcall(require, "luci.model.uci")
+local uci
+if uci_loaded then
+    uci = uci_result.cursor()
+    io.stderr:write(string.format("[%s] 调试：uci库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+else
+    io.stderr:write(string.format("[%s] 错误：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
+    io.stderr:write(string.format("[%s] 错误：UCI库是必需的，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
+    os.exit(1) -- 如果UCI库无法加载，则退出
+end
+
+-- 定义 os.capture 函数（用于执行命令并捕获输出）
+function os.capture(cmd, raw)
+    local f, err = io.popen(cmd, 'r')
+    if not f then return nil, err end
+    local s, err = f:read('*a')
+    f:close()
+    if not s then return nil, err end
+    if raw then return s end
+    s = string.gsub(s, '^%s+', '')
+    s = string.gsub(s, '%s+$', '')
+    s = string.gsub(s, '[\n\r]+', ' ')
+    return s
+end
 
 -- 状态更新（优化版）
 local last_status_update = {}
