@@ -517,6 +517,8 @@ end
 -- 服务入口
 -- 首先输出到标准错误，确保即使日志系统有问题也能看到
 io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
+io.stderr:write(string.format("[%s] 调试：Lua脚本开始执行\n", os.date("%Y-%m-%d %H:%M:%S")))
+
 write_log("====== 服务初始化开始 ======")
 
 -- 调试：记录当前工作目录和用户信息
@@ -524,6 +526,19 @@ local nixio = require "nixio"
 write_log(string.format("当前进程ID: %d", nixio.getpid()))
 write_log(string.format("当前用户ID: %d", nixio.getuid()))
 write_log(string.format("当前工作目录: %s", os.getenv("PWD") or "未知"))
+
+-- 检查必要的目录和文件权限
+local fs = require "nixio.fs"
+write_log("检查/var/run目录权限...")
+if fs.access("/var/run") then
+    write_log("/var/run目录存在")
+    local stat = fs.stat("/var/run")
+    if stat then
+        write_log(string.format("/var/run目录权限: %o", stat.mode or 0))
+    end
+else
+    write_log("警告：/var/run目录不存在")
+end
 
 -- 尝试写入PID文件
 write_log("开始尝试写入PID文件...")
