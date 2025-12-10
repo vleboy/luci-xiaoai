@@ -12,27 +12,9 @@ start_service() {
     logger -t xiaoai-mqtt "XiaoAi MQTT 服务初始化开始 - $timestamp"
     logger -t xiaoai-mqtt "=========================================="
 
-    # 清理残留进程和文件（优化版，减少系统调用）
-    # 使用更高效的进程查找方法
-    local pid_file="/var/run/xiaoai-mqtt.pid"
-    local sub_pid_file="/var/run/mosquitto_sub.pid"
-    
-    # 如果存在PID文件，读取并终止进程
-    if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file" 2>/dev/null)
-        [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
-        logger -t xiaoai-mqtt "清理旧进程 PID: $pid"
-    fi
-    
-    if [ -f "$sub_pid_file" ]; then
-        local sub_pid=$(cat "$sub_pid_file" 2>/dev/null)
-        [ -n "$sub_pid" ] && kill -9 "$sub_pid" 2>/dev/null
-        logger -t xiaoai-mqtt "清理MQTT订阅进程 PID: $sub_pid"
-    fi
-    
-    # 清理文件
+    # 清理残留文件（Lua脚本会在启动时处理进程清理）
     rm -f /var/run/mosquitto_sub.pid /tmp/mosquitto_sub.out /var/run/xiaoai-mqtt.pid /var/run/xiaoai-mqtt.status
-    logger -t xiaoai-mqtt "清理旧状态文件完成"
+    logger -t xiaoai-mqtt "清理旧PID和状态文件完成"
     
     # 创建状态文件
     touch /var/run/xiaoai-mqtt.status
@@ -134,22 +116,32 @@ stop_service() {
     logger -t xiaoai-mqtt "XiaoAi MQTT 服务停止开始 - $timestamp"
     logger -t xiaoai-mqtt "=========================================="
 
-    # 终止主进程
-    local pid=$(pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua")
-    if [ -n "$pid" ]; then
-        logger -t xiaoai-mqtt "终止主进程 PID: $pid"
-        kill -TERM $pid 2>/dev/null
+    # 终止主进程（通过PID文件）
+    local pid_file="/var/run/xiaoai-mqtt.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            logger -t xiaoai-mqtt "终止主进程 PID: $pid"
+            kill -TERM "$pid" 2>/dev/null
+        else
+            logger -t xiaoai-mqtt "PID文件存在但内容为空，无法终止主进程"
+        fi
     else
-        logger -t xiaoai-mqtt "未找到运行中的主进程"
+        logger -t xiaoai-mqtt "未找到主进程PID文件"
     fi
 
-    # 强制终止所有关联进程（包括mosquitto_sub）
-    local sub_pids=$(pgrep -f "mosquitto_sub -h bemfa.com")
-    if [ -n "$sub_pids" ]; then
-        logger -t xiaoai-mqtt "终止MQTT订阅进程 PIDs: $sub_pids"
-        echo "$sub_pids" | xargs kill -9 2>/dev/null
+    # 终止 mosquitto_sub 进程（通过PID文件）
+    local sub_pid_file="/var/run/mosquitto_sub.pid"
+    if [ -f "$sub_pid_file" ]; then
+        local sub_pid=$(cat "$sub_pid_file" 2>/dev/null)
+        if [ -n "$sub_pid" ]; then
+            logger -t xiaoai-mqtt "终止MQTT订阅进程 PID: $sub_pid"
+            kill -9 "$sub_pid" 2>/dev/null # 强制终止，确保清理
+        else
+            logger -t xiaoai-mqtt "MQTT订阅PID文件存在但内容为空，无法终止进程"
+        fi
     else
-        logger -t xiaoai-mqtt "未找到MQTT订阅进程"
+        logger -t xiaoai-mqtt "未找到MQTT订阅进程PID文件"
     fi
 
     # 清理状态文件
@@ -176,15 +168,18 @@ reload_service() {
     logger -t xiaoai-mqtt "=========================================="
     
     # 使用HUP信号触发日志轮转
-    local pid=$(pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua")
-    if [ -n "$pid" ]; then
-        logger -t xiaoai-mqtt "找到服务进程 PID: $pid，发送HUP信号"
-        kill -HUP $pid
-        logger -t xiaoai-mqtt "HUP信号已发送"
+    local pid_file="/var/run/xiaoai-mqtt.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            logger -t xiaoai-mqtt "找到服务进程 PID: $pid，发送HUP信号"
+            kill -HUP "$pid"
+            logger -t xiaoai-mqtt "HUP信号已发送"
+        else
+            logger -t xiaoai-mqtt "警告：PID文件存在但内容为空，无法发送HUP信号"
+        fi
     else
-        logger -t xiaoai-mqtt "警告：未找到服务进程，无法发送HUP信号"
-        logger -t xiaoai-mqtt "调试信息：pgrep模式为 'lua /etc/xiaoai-mqtt/mqtt_client.lua'"
-        logger -t xiaoai-mqtt "可能原因：服务未运行或pgrep模式不匹配"
+        logger -t xiaoai-mqtt "警告：未找到服务进程PID文件，无法发送HUP信号"
     fi
     
     # 记录重新加载完成日志

@@ -4,8 +4,14 @@ STATUS_FILE="/var/run/xiaoai-mqtt.status"
 LOG_FILE="/var/log/xiaoai-mqtt.log"
 
 get_service_status() {
-    if pgrep -f "lua /etc/xiaoai-mqtt/mqtt_client.lua" >/dev/null; then
-        echo "running"
+    local pid_file="/var/run/xiaoai-mqtt.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "running"
+        else
+            echo "stopped"
+        fi
     else
         echo "stopped"
     fi
@@ -24,9 +30,13 @@ get_last_action() {
 }
 
 get_log_stats() {
-    printf "%d|%s" \
-        $(wc -l <$LOG_FILE 2>/dev/null) \
-        $(ls -lh $LOG_FILE 2>/dev/null | awk '{print $5}')
+    local line_count=0
+    local file_size="0B"
+    if [ -f "$LOG_FILE" ]; then
+        line_count=$(wc -l <"$LOG_FILE" 2>/dev/null)
+        file_size=$(ls -lh "$LOG_FILE" 2>/dev/null | awk '{print $5}')
+    fi
+    printf "%d|%s" "$line_count" "$file_size"
 }
 
 case $1 in

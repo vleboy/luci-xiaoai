@@ -51,18 +51,34 @@ function m.on_after_save(self)
     
     -- 写入日志文件
     local log_file = "/var/log/xiaoai-mqtt.log"
-    local file = io.open(log_file, "a")
+    local file, err = io.open(log_file, "a")
     if file then
         file:write(log_message .. "\n")
         file:close()
     else
-        -- 如果文件不存在，尝试创建
-        os.execute(string.format("echo '%s' >> %s", log_message:gsub("'", "'\"'\"'"), log_file))
+        -- 如果文件不存在或无法打开，尝试创建并写入
+        local create_success, create_err = pcall(function()
+            local f = io.open(log_file, "w") -- 尝试创建新文件
+            if f then
+                f:write(log_message .. "\n")
+                f:close()
+            else
+                error(create_err or "无法创建或写入日志文件")
+            end
+        end)
+        if not create_success then
+            luci.sys.syslog("error", "XiaoAi MQTT: 无法写入日志文件 %s: %s", log_file, tostring(create_err))
+        end
     end
     
     -- 重启服务
-    os.execute("/etc/init.d/xiaoai-mqtt restart >/dev/null 2>&1")
-    luci.http.redirect(luci.dispatcher.build_url("admin/services/xiaoai-mqtt/basic"))
+    local status, exitcode = sys.call("/etc/init.d/xiaoai-mqtt restart >/dev/null 2>&1")
+    if status ~= 0 then
+        luci.sys.syslog("error", "XiaoAi MQTT: 服务重启失败，退出码: %d", exitcode)
+        luci.http.redirect(luci.dispatcher.build_url("admin/services/xiaoai-mqtt/basic?error=restart_failed"))
+    else
+        luci.http.redirect(luci.dispatcher.build_url("admin/services/xiaoai-mqtt/basic"))
+    end
 end
 
 -- 服务状态显示
@@ -101,7 +117,11 @@ client_id.placeholder = "随机生成"
 client_id.rmempty = false
 client_id.validate = function(self, value)
     if value and #value > 0 then return value end
-    return nixio.bin.hexlify(nixio.bin.urandom(8))
+    -- 如果用户未输入且当前配置中也没有，则生成一个随机ID
+    if not self.value or #self.value == 0 then
+        return nixio.bin.hexlify(nixio.bin.urandom(8))
+    end
+    return self.value -- 否则使用当前配置中的值
 end
 
 local topic = s:option(Value, "mqtt_topic", translate("订阅主题"))

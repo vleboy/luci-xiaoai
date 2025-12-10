@@ -15,6 +15,19 @@ end
 
 io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
 
+
+-- 立即写入PID文件
+write_log("开始尝试写入PID文件...")
+local pid_result = write_pid_file()
+if not pid_result then
+    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
+    write_log("错误：无法写入PID文件，服务启动失败")
+    os.exit(1)
+end
+
+io.stderr:write(string.format("[%s] PID文件写入成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+write_log("PID文件写入成功")
+
 -- 尝试加载uci库
 io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
 local uci_loaded, uci_result = pcall(require, "luci.model.uci")
@@ -23,23 +36,18 @@ if uci_loaded then
     uci = uci_result.cursor()
     io.stderr:write(string.format("[%s] 调试：uci库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
 else
-    io.stderr:write(string.format("[%s] 警告：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
-    io.stderr:write(string.format("[%s] 调试：使用备用配置读取方法\n", os.date("%Y-%m-%d %H:%M:%S")))
-    -- 创建简单的uci模拟对象
-    uci = {
-        get_all = function(self, config, section)
-            io.stderr:write(string.format("[%s] 调试：读取配置 %s.%s\n", os.date("%Y-%m-%d %H:%M:%S"), config, section))
-            -- 返回空配置，避免崩溃
-            return {}
-        end
-    }
+    io.stderr:write(string.format("[%s] 错误：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
+    io.stderr:write(string.format("[%s] 错误：UCI库是必需的，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
+    os.exit(1) -- 如果UCI库无法加载，则退出
 end
 
 -- 定义 os.capture 函数（用于执行命令并捕获输出）
 function os.capture(cmd, raw)
-    local f = assert(io.popen(cmd, 'r'))
-    local s = assert(f:read('*a'))
+    local f, err = io.popen(cmd, 'r')
+    if not f then return nil, err end
+    local s, err = f:read('*a')
     f:close()
+    if not s then return nil, err end
     if raw then return s end
     s = string.gsub(s, '^%s+', '')
     s = string.gsub(s, '%s+$', '')
@@ -87,6 +95,7 @@ local function write_log(msg)
             io.stderr:write(string.format("[%s] 日志写入失败: %s\n", timestamp, msg))
         end
     end
+    check_log_rotation() -- 在每次写入后检查并执行日志轮转
 end
 
 -- 独立的日志轮转函数（不调用write_log）
@@ -252,24 +261,20 @@ local function start_mosquitto_sub()
     )
     
     write_log("启动命令: "..cmd:gsub(" -P '%S+'", "")) -- 安全过滤
-    local handle = io.popen(cmd)
+    local handle, err = io.popen(cmd)
+    if not handle then
+        write_log("错误: 无法执行 mosquitto_sub 命令: " .. tostring(err))
+        return nil
+    end
     local output = handle:read("*a")
     handle:close()
     write_log("启动命令输出: "..(output or "无输出"))
     
-    -- 获取PID
-    local pid = nil
-    local function get_pid_from_output(output)
-        local pattern = "%d+"
-        local pid_str = string.match(output, pattern)
-        if pid_str then
-            pid = tonumber(pid_str)
-        end
-    end
-    get_pid_from_output(output)
+    -- 从PID文件中获取PID
+    local pid = read_pid_file(SUB_PID_FILE)
     
     if not pid then
-        write_log("错误: 无法获取PID，请检查权限")
+        write_log("错误: 无法从PID文件获取PID，请检查权限或命令执行")
         return nil
     end
     
@@ -357,8 +362,8 @@ local function process_messages()
         end
     end
     
-    -- 清空已处理内容（使用truncate而不是重定向）
-    os.execute("truncate -s 0 "..SUB_OUTPUT_FILE)
+    -- 清空已处理内容（通过覆盖文件）
+    fs.writefile(SUB_OUTPUT_FILE, "")
 end
 
 -- 主循环
@@ -543,78 +548,7 @@ local function register_signal_handlers()
         write_log("SIGHUP信号处理函数注册成功")
     end
     
-    -- 其他信号使用字符串处理
-    nixio.signal(15, "ign")  -- SIGTERM:忽略信号
-    nixio.signal(2, "ign")   -- SIGINT:忽略信号
+    -- 其他信号使用函数处理，以便执行清理
+    nixio.signal(15, _G.handle_signal)  -- SIGTERM: 终止信号
+    nixio.signal(2, _G.handle_signal)   -- SIGINT: 中断信号
 end
-
--- 服务入口
--- 首先输出到标准错误，确保即使日志系统有问题也能看到
-io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
-io.stderr:write(string.format("[%s] 调试：Lua脚本开始执行\n", os.date("%Y-%m-%d %H:%M:%S")))
-
--- 立即输出到标准错误，确保能看到
-io.stderr:write(string.format("[%s] 调试：加载nixio库\n", os.date("%Y-%m-%d %H:%M:%S")))
-
--- 尝试加载nixio库
-local nixio_loaded, nixio = pcall(require, "nixio")
-if not nixio_loaded then
-    io.stderr:write(string.format("[%s] 错误：无法加载nixio库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(nixio)))
-    os.exit(1)
-end
-
-io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
-
-write_log("====== 服务初始化开始 ======")
-
--- 调试：记录当前工作目录和用户信息
-write_log(string.format("当前进程ID: %d", nixio.getpid()))
-write_log(string.format("当前用户ID: %d", nixio.getuid()))
-write_log(string.format("当前工作目录: %s", os.getenv("PWD") or "未知"))
-
--- 检查必要的目录和文件权限
-local fs = require "nixio.fs"
-write_log("检查/var/run目录权限...")
-if fs.access("/var/run") then
-    write_log("/var/run目录存在")
-    local stat = fs.stat("/var/run")
-    if stat then
-        write_log(string.format("/var/run目录权限: %o", stat.mode or 0))
-    end
-else
-    write_log("警告：/var/run目录不存在")
-end
-
--- 尝试写入PID文件
-write_log("开始尝试写入PID文件...")
-local pid_result = write_pid_file()
-if not pid_result then
-    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
-    write_log("错误：无法写入PID文件，服务启动失败")
-    os.exit(1)
-end
-
-io.stderr:write(string.format("[%s] PID文件写入成功，注册信号处理\n", os.date("%Y-%m-%d %H:%M:%S")))
-write_log("PID文件写入成功，开始注册信号处理...")
-register_signal_handlers()
-write_log("信号处理注册完成")
-
-write_log("更新服务状态为running...")
-update_status("service_status", "running")
-write_log("服务状态更新完成")
-
-io.stderr:write(string.format("[%s] 进入主循环\n", os.date("%Y-%m-%d %H:%M:%S")))
-write_log("====== 进入主循环 ======")
-
-local ok, err = pcall(main_loop)
-
-write_log("====== 主循环退出，开始清理 ======")
-cleanup()
-
-if not ok then
-    io.stderr:write(string.format("[%s] 服务异常退出: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
-    write_log(string.format("服务异常退出: %s", tostring(err)))
-    os.exit(1)
-end
-
-write_log("====== 服务正常退出 ======")
