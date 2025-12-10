@@ -392,6 +392,12 @@ local function write_pid_file()
     local pid = nixio.getpid()
     local fs = require "nixio.fs"
     
+    -- 检查pid是否有效
+    if not pid then
+        write_log("错误：无法获取进程ID")
+        return false
+    end
+    
     write_log(string.format("开始写入PID文件，当前PID: %d", pid))
     write_log(string.format("PID文件路径: %s", PID_FILE))
     
@@ -411,10 +417,15 @@ local function write_pid_file()
         write_log("目录 /var/run 已存在")
     end
     
-    -- 检查目录权限
+    -- 检查目录权限（安全地处理可能为nil的mode）
     local dir_stat = fs.stat(dir)
     if dir_stat then
-        write_log(string.format("目录权限: %o", dir_stat.mode))
+        local mode = dir_stat.mode
+        if mode then
+            write_log(string.format("目录权限: %o", mode))
+        else
+            write_log("目录权限: 无法获取权限信息")
+        end
     end
     
     -- 尝试写入PID文件
@@ -507,19 +518,43 @@ end
 -- 首先输出到标准错误，确保即使日志系统有问题也能看到
 io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
 write_log("====== 服务初始化开始 ======")
-if not write_pid_file() then
+
+-- 调试：记录当前工作目录和用户信息
+local nixio = require "nixio"
+write_log(string.format("当前进程ID: %d", nixio.getpid()))
+write_log(string.format("当前用户ID: %d", nixio.getuid()))
+write_log(string.format("当前工作目录: %s", os.getenv("PWD") or "未知"))
+
+-- 尝试写入PID文件
+write_log("开始尝试写入PID文件...")
+local pid_result = write_pid_file()
+if not pid_result then
     io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
     write_log("错误：无法写入PID文件，服务启动失败")
     os.exit(1)
 end
+
 io.stderr:write(string.format("[%s] PID文件写入成功，注册信号处理\n", os.date("%Y-%m-%d %H:%M:%S")))
+write_log("PID文件写入成功，开始注册信号处理...")
 register_signal_handlers()
+write_log("信号处理注册完成")
+
+write_log("更新服务状态为running...")
 update_status("service_status", "running")
+write_log("服务状态更新完成")
+
 io.stderr:write(string.format("[%s] 进入主循环\n", os.date("%Y-%m-%d %H:%M:%S")))
+write_log("====== 进入主循环 ======")
+
 local ok, err = pcall(main_loop)
+
+write_log("====== 主循环退出，开始清理 ======")
 cleanup()
+
 if not ok then
     io.stderr:write(string.format("[%s] 服务异常退出: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
     write_log(string.format("服务异常退出: %s", tostring(err)))
     os.exit(1)
 end
+
+write_log("====== 服务正常退出 ======")
