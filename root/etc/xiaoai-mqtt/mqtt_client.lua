@@ -27,6 +27,8 @@ local LOG_MAX_SIZE = 1024 * 1024  -- 1MB
 local LOG_MAX_FILES = 5
 
 -- 简单的日志记录函数（避免递归调用）
+local check_log_rotation -- 前向声明
+
 local function write_log(msg)
     local fs = require "nixio.fs"
     
@@ -114,7 +116,7 @@ local function check_and_rotate_log()
     end
 end
 
-local check_log_rotation = check_and_rotate_log()
+check_log_rotation = check_and_rotate_log()
 
 -- 写入PID文件
 local function write_pid_file()
