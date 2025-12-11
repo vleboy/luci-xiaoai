@@ -618,8 +618,21 @@ local function register_signal_handlers()
     end
     
     -- 其他信号使用函数处理，以便执行清理
-    nixio.signal(15, _G.handle_signal)  -- SIGTERM: 终止信号
-    nixio.signal(2, _G.handle_signal)   -- SIGINT: 中断信号
+    local term_success, term_err = pcall(function()
+        nixio.signal(15, _G.handle_signal)  -- SIGTERM: 终止信号
+    end)
+    if not term_success then
+        write_log("无法注册SIGTERM函数处理: " .. tostring(term_err))
+        pcall(function() nixio.signal(15, "dfl") end)
+    end
+
+    local int_success, int_err = pcall(function()
+        nixio.signal(2, _G.handle_signal)   -- SIGINT: 中断信号
+    end)
+    if not int_success then
+        write_log("无法注册SIGINT函数处理: " .. tostring(int_err))
+        pcall(function() nixio.signal(2, "dfl") end)
+    end
 end
 
 -- 初始化并运行
