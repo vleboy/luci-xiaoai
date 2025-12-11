@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xiaoai-mqtt
-PKG_VERSION:=25.12.11.02
+PKG_VERSION:=25.12.11.03
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=vleboy <vleboy@gmail.com>
@@ -29,6 +29,25 @@ define Package/$(PKG_NAME)/postinst
         ( . /etc/uci-defaults/luci-xiaoai-mqtt ) && rm -f /etc/uci-defaults/luci-xiaoai-mqtt
         /etc/init.d/xiaoai-mqtt enable || true
     fi
+    exit 0
+}
+endef
+
+define Package/$(PKG_NAME)/prerm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+    /etc/init.d/xiaoai-mqtt stop || true
+    /etc/init.d/xiaoai-mqtt disable || true
+    exit 0
+}
+endef
+
+define Package/$(PKG_NAME)/postrm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+    rm -f /var/run/xiaoai-mqtt.pid
+    rm -f /var/run/xiaoai-mqtt.status
+    rm -f /var/log/xiaoai-mqtt.log*
     exit 0
 }
 endef

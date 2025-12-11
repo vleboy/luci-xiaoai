@@ -109,82 +109,9 @@ start_service() {
     logger -t xiaoai-mqtt "=========================================="
 }
 
-stop_service() {
-    # 记录停止日志
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    logger -t xiaoai-mqtt "=========================================="
-    logger -t xiaoai-mqtt "XiaoAi MQTT 服务停止开始 - $timestamp"
-    logger -t xiaoai-mqtt "=========================================="
-
-    # 终止主进程（通过PID文件）
-    local pid_file="/var/run/xiaoai-mqtt.pid"
-    if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file" 2>/dev/null)
-        if [ -n "$pid" ]; then
-            logger -t xiaoai-mqtt "终止主进程 PID: $pid"
-            kill -TERM "$pid" 2>/dev/null
-        else
-            logger -t xiaoai-mqtt "PID文件存在但内容为空，无法终止主进程"
-        fi
-    else
-        logger -t xiaoai-mqtt "未找到主进程PID文件"
-    fi
-
-    # 终止 mosquitto_sub 进程（通过PID文件）
-    local sub_pid_file="/var/run/mosquitto_sub.pid"
-    if [ -f "$sub_pid_file" ]; then
-        local sub_pid=$(cat "$sub_pid_file" 2>/dev/null)
-        if [ -n "$sub_pid" ]; then
-            logger -t xiaoai-mqtt "终止MQTT订阅进程 PID: $sub_pid"
-            kill -9 "$sub_pid" 2>/dev/null # 强制终止，确保清理
-        else
-            logger -t xiaoai-mqtt "MQTT订阅PID文件存在但内容为空，无法终止进程"
-        fi
-    else
-        logger -t xiaoai-mqtt "未找到MQTT订阅进程PID文件"
-    fi
-
-    # 清理状态文件
-    echo "mqtt_connection=disconnected" > /var/run/xiaoai-mqtt.status
-    echo "last_action=服务已停止" >> /var/run/xiaoai-mqtt.status
-    logger -t xiaoai-mqtt "更新状态文件完成"
-
-    # 移除PID文件
-    rm -f /var/run/xiaoai-mqtt.pid
-    logger -t xiaoai-mqtt "移除PID文件完成"
-    
-    # 记录停止完成日志
-    local end_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    logger -t xiaoai-mqtt "=========================================="
-    logger -t xiaoai-mqtt "XiaoAi MQTT 服务停止完成 - $end_timestamp"
     logger -t xiaoai-mqtt "=========================================="
 }
 
-reload_service() {
-    # 记录重新加载日志
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    logger -t xiaoai-mqtt "=========================================="
-    logger -t xiaoai-mqtt "XiaoAi MQTT 服务重新加载开始 - $timestamp"
-    logger -t xiaoai-mqtt "=========================================="
-    
-    # 使用HUP信号触发日志轮转
-    local pid_file="/var/run/xiaoai-mqtt.pid"
-    if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file" 2>/dev/null)
-        if [ -n "$pid" ]; then
-            logger -t xiaoai-mqtt "找到服务进程 PID: $pid，发送HUP信号"
-            kill -HUP "$pid"
-            logger -t xiaoai-mqtt "HUP信号已发送"
-        else
-            logger -t xiaoai-mqtt "警告：PID文件存在但内容为空，无法发送HUP信号"
-        fi
-    else
-        logger -t xiaoai-mqtt "警告：未找到服务进程PID文件，无法发送HUP信号"
-    fi
-    
-    # 记录重新加载完成日志
-    local end_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    logger -t xiaoai-mqtt "=========================================="
-    logger -t xiaoai-mqtt "XiaoAi MQTT 服务重新加载完成 - $end_timestamp"
-    logger -t xiaoai-mqtt "=========================================="
+service_triggers() {
+	procd_add_reload_trigger "xiaoai-mqtt"
 }
