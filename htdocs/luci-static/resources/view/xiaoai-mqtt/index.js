@@ -415,12 +415,10 @@ return view.extend({
             setupServiceControlButton('restart_service_btn', 'restart', _('重启成功'));
         }
 
-        // 在页面渲染完成后初始化
-        window.addEventListener('load', function() {
-            // 延迟500ms确保DOM完全加载
+        return m.render().then(function(node) {
+            // 启动状态更新循环
             setTimeout(initStatusUpdate, 500);
+            return node;
         });
-
-        return m.render();
     }
 });
