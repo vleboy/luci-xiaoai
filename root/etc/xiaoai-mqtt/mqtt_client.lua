@@ -189,17 +189,7 @@ local function write_pid_file()
     end
 end
 
--- 立即写入PID文件
-write_log("开始尝试写入PID文件...")
-local pid_result = write_pid_file()
-if not pid_result then
-    io.stderr:write(string.format("[%s] 错误：无法写入PID文件，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
-    write_log("错误：无法写入PID文件，服务启动失败")
-    os.exit(1)
-end
-
-io.stderr:write(string.format("[%s] PID文件写入成功\n", os.date("%Y-%m-%d %H:%M:%S")))
-write_log("PID文件写入成功")
+-- write_pid_file() -- 移除：由procd管理PID文件
 
 -- 尝试加载uci库
 io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
@@ -495,76 +485,7 @@ local function force_reconnect()
     end
 end
 
--- 写入PID文件
-local function write_pid_file()
-    local pid = nixio.getpid()
-    local fs = require "nixio.fs"
-    
-    -- 检查pid是否有效
-    if not pid then
-        write_log("错误：无法获取进程ID")
-        return false
-    end
-    
-    write_log(string.format("开始写入PID文件，当前PID: %d", pid))
-    write_log(string.format("PID文件路径: %s", PID_FILE))
-    
-    -- 确保目录存在
-    local dir = "/var/run"
-    if not fs.access(dir) then
-        write_log("目录 /var/run 不存在，尝试创建...")
-        local mkdir_success, mkdir_err = pcall(function()
-            fs.mkdir(dir)
-        end)
-        if mkdir_success then
-            write_log("目录创建成功")
-        else
-            write_log("目录创建失败: " .. tostring(mkdir_err))
-        end
-    else
-        write_log("目录 /var/run 已存在")
-    end
-    
-    -- 检查目录权限（安全地处理可能为nil的mode）
-    local dir_stat = fs.stat(dir)
-    if dir_stat then
-        local mode = dir_stat.mode
-        if mode then
-            write_log(string.format("目录权限: %o", mode))
-        else
-            write_log("目录权限: 无法获取权限信息")
-        end
-    end
-    
-    -- 尝试写入PID文件
-    write_log("尝试写入PID文件...")
-    local pcall_success, write_result = pcall(function()
-        return fs.writefile(PID_FILE, tostring(pid))
-    end)
-    
-    if pcall_success and write_result then  -- pcall成功且writefile返回true
-        fs.chmod(PID_FILE, 644)
-        write_log(string.format("PID文件写入成功: %d", pid))
-        
-        -- 验证文件是否真的存在
-        if fs.access(PID_FILE) then
-            local file_content = fs.readfile(PID_FILE) or ""
-            write_log(string.format("验证PID文件内容: %s", file_content))
-            return true
-        else
-            write_log("警告：PID文件写入成功但文件不存在")
-            return false
-        end
-    else
-        if not pcall_success then
-            write_log("无法写入PID文件，pcall错误: " .. tostring(write_result))
-        else
-            write_log("无法写入PID文件，writefile返回false")
-        end
-        write_log("路径: " .. PID_FILE)
-        return false
-    end
-end
+
 
 local function cleanup()
     -- 终止主进程（通过 PID 文件）
