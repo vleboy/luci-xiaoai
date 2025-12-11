@@ -589,67 +589,16 @@ local function cleanup()
     write_log("清理完成")
 end
 
--- 信号处理函数必须是全局函数，否则无法被正确调用
-_G.handle_signal = function(sig)
-    local success, err = pcall(function()
-        if sig == 1 then  -- SIGHUP: 重新连接信号
-            write_log("收到重新连接信号(SIGHUP)，重新启动MQTT连接...")
-            -- 更新状态为重新连接中
-            update_status("mqtt_connection", "reconnecting")
-            -- 调用强制重新连接函数
-            force_reconnect()
-        else
-            write_log(string.format("收到终止信号 %d，准备退出...", sig))
-            -- 设置退出标志
-            should_exit = true
-            -- 更新状态
-            update_status("service_status", "stopping")
-            update_status("mqtt_connection", "disconnecting")
-        end
-    end)
-    
-    if not success then
-        -- 如果日志还没准备好，尝试输出到stderr
-        if io.stderr then
-            io.stderr:write("信号处理出错: " .. tostring(err) .. "\n")
-        end
-        -- 确保在错误时也能退出（如果是终止信号）
-        if sig ~= 1 then
-            should_exit = true
-        end
-    end
-end
-
--- 注册信号处理 - 尝试使用函数，如果失败则使用字符串
+-- 注册信号处理
+-- 注意：在某些OpenWrt即nixio版本上，nixio.signal不支持Lua回调函数(只支持 "dfl" 或 "ign")
+-- 因此我们无法在Lua中优雅地捕获信号进行清理。
+-- 清理工作依赖 init.d 脚本或下次启动时的检查。
 local function register_signal_handlers()
-    -- 尝试注册SIGHUP处理函数
-    local success, err = pcall(function()
-        nixio.signal(1, _G.handle_signal)
-    end)
-    
-    if not success then
-        write_log("无法注册SIGHUP函数处理，使用默认处理: " .. tostring(err))
-        nixio.signal(1, "dfl")  -- 使用默认处理而不是无效的"handle"
-    else
-        write_log("SIGHUP信号处理函数注册成功")
-    end
-    
-    -- 其他信号使用函数处理，以便执行清理
-    local term_success, term_err = pcall(function()
-        nixio.signal(15, _G.handle_signal)  -- SIGTERM: 终止信号
-    end)
-    if not term_success then
-        write_log("无法注册SIGTERM函数处理: " .. tostring(term_err))
-        pcall(function() nixio.signal(15, "dfl") end)
-    end
-
-    local int_success, int_err = pcall(function()
-        nixio.signal(2, _G.handle_signal)   -- SIGINT: 中断信号
-    end)
-    if not int_success then
-        write_log("无法注册SIGINT函数处理: " .. tostring(int_err))
-        pcall(function() nixio.signal(2, "dfl") end)
-    end
+    -- 设置为默认处理，避免报错
+    nixio.signal(1, "dfl")   -- SIGHUP
+    nixio.signal(15, "dfl")  -- SIGTERM
+    nixio.signal(2, "dfl")   -- SIGINT
+    write_log("信号处理设置为系统默认 (当前环境不支持Lua回调)")
 end
 
 -- 初始化并运行

@@ -186,10 +186,17 @@ function start_service()
         message = ""
     }
     
+    local uci = require "luci.model.uci".cursor()
+    
+    -- 启用服务配置
+    uci:set("xiaoai-mqtt", "main", "enabled", "1")
+    uci:commit("xiaoai-mqtt")
+    
     -- 检查服务是否已经在运行
     local is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
     
     if is_running then
+        response.success = true -- 已经在运行也算成功
         response.message = "服务已经在运行"
         luci.http.prepare_content("application/json")
         luci.http.write_json(response)
@@ -230,10 +237,17 @@ function stop_service()
         message = ""
     }
     
+    local uci = require "luci.model.uci".cursor()
+    
+    -- 禁用服务配置
+    uci:set("xiaoai-mqtt", "main", "enabled", "0")
+    uci:commit("xiaoai-mqtt")
+    
     -- 检查服务是否在运行
     local is_running = (luci.sys.call("pgrep -f 'lua /etc/xiaoai-mqtt/mqtt_client.lua' >/dev/null") == 0)
     
     if not is_running then
+        response.success = true -- 未运行也算停用成功
         response.message = "服务未在运行"
         luci.http.prepare_content("application/json")
         luci.http.write_json(response)

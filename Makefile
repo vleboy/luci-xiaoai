@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xiaoai-mqtt
-PKG_VERSION:=25.12.11.06
+PKG_VERSION:=25.12.11.07
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=vleboy <vleboy@gmail.com>
@@ -78,6 +78,10 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/etc/xiaoai-mqtt
 	$(INSTALL_BIN) ./root/etc/xiaoai-mqtt/mqtt_client.lua $(1)/etc/xiaoai-mqtt/
 	$(INSTALL_BIN) ./root/etc/xiaoai-mqtt/status.sh $(1)/etc/xiaoai-mqtt/
+
+	# UCI Defaults
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./root/etc/uci-defaults/luci-xiaoai-mqtt $(1)/etc/uci-defaults/
 
 	# 安装启动脚本
 	$(INSTALL_DIR) $(1)/etc/init.d

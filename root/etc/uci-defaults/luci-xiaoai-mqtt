@@ -1,0 +1,9 @@
+#!/bin/sh
+
+uci -q batch <<-EOF
+	set xiaoai-mqtt.main=service
+	set xiaoai-mqtt.main.enabled='1'
+	commit xiaoai-mqtt
+EOF
+
+exit 0
