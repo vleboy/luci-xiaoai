@@ -2,27 +2,43 @@
 
 USE_PROCD=1
 START=99
-# STOP=10 # procd handles stop
+STOP=10
 
 start_service() {
     # 确保目录存在
     [ ! -d /var/run ] && mkdir -p /var/run
-    [ ! -f /var/log/xiaoai-mqtt.log ] && touch /var/log/xiaoai-mqtt.log
-
-    # 清理残留
+    
+    # 清理残留状态
     rm -f /var/run/xiaoai-mqtt.status
 
     # 启动进程
     procd_open_instance
     procd_set_param command /usr/bin/lua "/etc/xiaoai-mqtt/mqtt_client.lua"
-    procd_set_param respawn
+    
+    # 自动重启设置
+    procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+    
+    # 标准输出/错误重定向
     procd_set_param stdout 1
     procd_set_param stderr 1
+    
+    # PID文件管理
+    procd_set_param pidfile /var/run/xiaoai-mqtt.pid
+    
+    # 设置环境变量
     procd_set_param env LUA_PATH="/usr/lib/lua/?.lua;/usr/lib/lua/?/init.lua"
     procd_set_param env LUA_CPATH="/usr/lib/lua/?.so"
+    
+    # 设置停止超时（默认5秒，增加到30秒以确保正常停止）
+    procd_set_param term_timeout 30
+    
     procd_close_instance
 }
 
+# stop_service() 函数由procd自动处理
+# 我们不需要自定义stop_service，因为procd会发送SIGTERM信号
+# 而我们的Lua脚本已经正确处理了SIGTERM信号
+
 service_triggers() {
-	procd_add_reload_trigger "xiaoai-mqtt"
+    procd_add_reload_trigger "xiaoai-mqtt"
 }

@@ -1,19 +1,26 @@
 -- 服务入口
--- 首先输出到标准错误，确保即使日志系统有问题也能看到
-io.stderr:write(string.format("[%s] ====== 服务初始化开始 ======\n", os.date("%Y-%m-%d %H:%M:%S")))
-io.stderr:write(string.format("[%s] 调试：Lua脚本开始执行\n", os.date("%Y-%m-%d %H:%M:%S")))
+-- 优化：使用标准输出缓冲设置，避免输出导致阻塞
+if io.stdout then io.stdout:setvbuf("no") end
+if io.stderr then io.stderr:setvbuf("no") end
 
--- 立即输出到标准错误，确保能看到
-io.stderr:write(string.format("[%s] 调试：加载nixio库\n", os.date("%Y-%m-%d %H:%M:%S")))
+local function log_err(msg)
+    if io.stderr then
+        pcall(function() io.stderr:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(msg))) end)
+    end
+end
+
+log_err("====== 服务初始化开始 ======")
+log_err("调试：Lua脚本开始执行")
 
 -- 尝试加载nixio库
+log_err("调试：加载nixio库")
 local nixio_loaded, nixio = pcall(require, "nixio")
 if not nixio_loaded then
-    io.stderr:write(string.format("[%s] 错误：无法加载nixio库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(nixio)))
+    log_err("错误：无法加载nixio库: " .. tostring(nixio))
     os.exit(1)
 end
 
-io.stderr:write(string.format("[%s] 调试：nixio库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
+log_err("调试：nixio库加载成功")
 
 -- 常量定义
 local LOG_FILE = "/var/log/xiaoai-mqtt.log"
@@ -307,8 +314,19 @@ local function start_mosquitto_sub()
             return nil
         end
     end
+    
+    -- 清理旧的PID文件
+    if require("nixio.fs").access(SUB_PID_FILE) then
+        os.remove(SUB_PID_FILE)
+    end
+    -- 清理旧的输出文件，避免读取到上一次的错误
+    if require("nixio.fs").access(SUB_OUTPUT_FILE) then
+        os.remove(SUB_OUTPUT_FILE)
+    end
 
     -- 构建命令
+    -- 使用 os.execute 而不是 io.popen，避免管道阻塞
+    -- 确保所有输出都被重定向，并且在后台运行
     local cmd = string.format(
         "mosquitto_sub -h '%s' -p %d -t '%s' -i '%s' --protocol-version mqttv311 -q 1 -v > '%s' 2>&1 & echo $! > '%s'",
         config.mqtt_broker,
@@ -320,23 +338,51 @@ local function start_mosquitto_sub()
     )
     
     write_log("启动命令: "..cmd:gsub(" -P '%S+'", "")) -- 安全过滤
-    local handle, err = io.popen(cmd)
-    if not handle then
-        write_log("错误: 无法执行 mosquitto_sub 命令: " .. tostring(err))
-        return nil
-    end
-    local output = handle:read("*a")
-    handle:close()
-    write_log("启动命令输出: "..(output or "无输出"))
+    
+    local execute_status = os.execute(cmd)
+    
+    -- 给一点时间让文件系统同步和进程启动
+    -- 增加等待时间到0.5秒
+    require("nixio").nanosleep(0, 500000000)
     
     -- 从PID文件中获取PID
     local pid = read_pid_file(SUB_PID_FILE)
     
     if not pid then
-        write_log("错误: 无法从PID文件获取PID，请检查权限或命令执行")
+        -- 如果没有PID，说明启动失败或立即退出了
+        write_log("错误: 无法获取PID，尝试读取启动错误信息...")
+        
+        -- 读取输出文件看看有什么错误
+        local fs = require "nixio.fs"
+        if fs.access(SUB_OUTPUT_FILE) then
+            local err_content = fs.readfile(SUB_OUTPUT_FILE)
+            if err_content and #err_content > 0 then
+                write_log("mosquitto_sub 错误输出: " .. tostring(err_content))
+            else
+                write_log("无错误输出内容")
+            end
+        else
+            write_log("无法读取输出文件: " .. SUB_OUTPUT_FILE)
+        end
+        
+        write_log("命令执行返回状态: " .. tostring(execute_status))
         return nil
     end
     
+    -- 即使获取到了PID，也要检查一下进程是否还活着
+    if not is_process_alive(pid) then
+         write_log(string.format("警告: 获取到PID %d 但进程已不存在，可能启动后立即崩溃", pid))
+         -- 同样尝试读取错误日志
+         local fs = require "nixio.fs"
+         if fs.access(SUB_OUTPUT_FILE) then
+             local err_content = fs.readfile(SUB_OUTPUT_FILE)
+             if err_content and #err_content > 0 then
+                 write_log("mosquitto_sub 崩溃前输出: " .. tostring(err_content))
+             end
+         end
+         return nil
+    end
+
     return pid
 end
 
@@ -425,6 +471,9 @@ local function process_messages()
     fs.writefile(SUB_OUTPUT_FILE, "")
 end
 
+-- 主循环控制变量
+local should_exit = false
+
 -- 主循环
 local function main_loop()
     local reconnect_delay = 5
@@ -433,7 +482,7 @@ local function main_loop()
     update_status("service_status", "running")
     update_status("mqtt_connection", "connecting")
     
-    while true do
+    while not should_exit do
         local success, err = pcall(function()
             if not is_process_alive(pid) then
                 -- 清理旧进程
@@ -446,16 +495,21 @@ local function main_loop()
                 -- 启动新进程
                 pid = start_mosquitto_sub()
                 if not pid then
+                    update_status("mqtt_connection", "disconnected") -- 或 error
                     reconnect_delay = math.min(reconnect_delay * 2, 300)
                     write_log(string.format("启动进程失败，等待 %d 秒后重试...", reconnect_delay))
                     nixio.nanosleep(reconnect_delay)
                 else
                     write_log(string.format("进程启动成功 PID: %d", pid))
                     reconnect_delay = 5
+                    -- 稍微等待一下，让进程有时间建立连接或报错
+                    nixio.nanosleep(2)
                 end
             else
                 -- 处理消息
                 process_messages()
+                -- 只有当进程存活且没有报错退出时，才认为是connected
+                -- 这里假设只要进程活着就是连接成功的（mosquitto_sub如果连接失败通常会退出）
                 update_status("mqtt_connection", "connected") 
                 nixio.nanosleep(3)
                 update_status("service_heartbeat", os.date("%Y-%m-%d %H:%M:%S"))
@@ -468,6 +522,21 @@ local function main_loop()
             nixio.nanosleep(10)
         end
     end
+    
+    write_log("主循环退出，执行清理...")
+    -- 清理子进程
+    if pid and is_process_alive(pid) then
+        os.execute("kill -9 "..pid.." 2>/dev/null")
+        write_log(string.format("已终止订阅进程 PID: %d", pid))
+    end
+    os.remove(SUB_PID_FILE)
+    os.remove(SUB_OUTPUT_FILE)
+    update_status("service_status", "stopped")
+    update_status("mqtt_connection", "disconnected")
+    
+    -- 确保完全退出
+    write_log("服务正常退出")
+    os.exit(0)
 end
 
 -- 强制重新连接函数
@@ -511,16 +580,32 @@ end
 
 -- 信号处理函数必须是全局函数，否则无法被正确调用
 _G.handle_signal = function(sig)
-    if sig == 1 then  -- SIGHUP: 重新连接信号
-        write_log("收到重新连接信号(SIGHUP)，重新启动MQTT连接...")
-        -- 更新状态为重新连接中
-        update_status("mqtt_connection", "reconnecting")
-        -- 调用强制重新连接函数
-        force_reconnect()
-    else
-        write_log(string.format("收到信号 %d，执行清理...", sig))
-        cleanup()
-        os.exit(0)
+    local success, err = pcall(function()
+        if sig == 1 then  -- SIGHUP: 重新连接信号
+            write_log("收到重新连接信号(SIGHUP)，重新启动MQTT连接...")
+            -- 更新状态为重新连接中
+            update_status("mqtt_connection", "reconnecting")
+            -- 调用强制重新连接函数
+            force_reconnect()
+        else
+            write_log(string.format("收到终止信号 %d，准备退出...", sig))
+            -- 设置退出标志
+            should_exit = true
+            -- 更新状态
+            update_status("service_status", "stopping")
+            update_status("mqtt_connection", "disconnecting")
+        end
+    end)
+    
+    if not success then
+        -- 如果日志还没准备好，尝试输出到stderr
+        if io.stderr then
+            io.stderr:write("信号处理出错: " .. tostring(err) .. "\n")
+        end
+        -- 确保在错误时也能退出（如果是终止信号）
+        if sig ~= 1 then
+            should_exit = true
+        end
     end
 end
 
