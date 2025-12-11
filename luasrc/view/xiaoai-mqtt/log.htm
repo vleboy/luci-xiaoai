@@ -34,6 +34,10 @@
                 </button>
             </form>
             
+            <button class="cbi-button cbi-button-neutral" onclick="refreshLog(); return false;">
+                🔄 <%:刷新日志%>
+            </button>
+
             <a class="cbi-button cbi-button-apply" 
                href="<%= url('admin/services/xiaoai-mqtt/download_log') %>">
                 ⬇️ <%:下载日志%>

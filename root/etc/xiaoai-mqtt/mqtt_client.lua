@@ -37,31 +37,26 @@ local LOG_MAX_FILES = 5
 local check_log_rotation -- 前向声明
 
 local function write_log(msg)
-    local fs = require "nixio.fs"
-    
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local log_message = string.format("[%s] %s\n", timestamp, msg)
     
-    -- 直接写入日志文件，不调用轮转函数（避免递归）
-    local pcall_success, write_result = pcall(function()
-        return fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
-    end)
-    
-    if not pcall_success or not write_result then
-        -- 如果写入失败，尝试创建日志文件
-        local create_pcall_success, create_write_result = pcall(function()
-            -- 先尝试创建空文件
-            fs.writefile("/var/log/xiaoai-mqtt.log", "")
-            -- 然后写入日志
-            return fs.writefile("/var/log/xiaoai-mqtt.log", log_message, true)
-        end)
-        
-        if not create_pcall_success or not create_write_result then
-            -- 如果还是失败，输出到标准错误（最后的手段）
-            io.stderr:write(string.format("[%s] 日志写入失败: %s\n", timestamp, msg))
+    -- 使用 io.open 以追加模式打开文件，确保日志不会被覆盖
+    local file, err = io.open("/var/log/xiaoai-mqtt.log", "a+")
+    if file then
+        file:write(log_message)
+        file:close()
+    else
+        -- 如果文件打开失败，尝试输出到stderr
+        if io.stderr then
+            io.stderr:write(string.format("无法写入日志文件: %s\n", tostring(err)))
+            io.stderr:write(log_message)
         end
     end
-    check_log_rotation() -- 在每次写入后检查并执行日志轮转
+    
+    -- 尝试执行日志轮转（如果需要）
+    if check_log_rotation then
+        pcall(check_log_rotation) 
+    end
 end
 
 -- 独立的日志轮转函数（不调用write_log）
