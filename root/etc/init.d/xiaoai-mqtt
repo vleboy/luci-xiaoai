@@ -109,8 +109,7 @@ start_service() {
     logger -t xiaoai-mqtt "=========================================="
 }
 
-    logger -t xiaoai-mqtt "=========================================="
-}
+
 
 service_triggers() {
 	procd_add_reload_trigger "xiaoai-mqtt"

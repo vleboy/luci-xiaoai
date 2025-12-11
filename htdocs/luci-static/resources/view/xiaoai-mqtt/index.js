@@ -7,7 +7,7 @@
 'require poll';
 
 return view.extend({
-    render: function() {
+    render: function () {
         var m, s, o;
 
         m = new form.Map('xiaoai-mqtt', _('XiaoAi MQTT'), _('配置MQTT服务参数和设备控制选项'));
@@ -16,7 +16,7 @@ return view.extend({
         s = m.section(form.NamedSection, 'status', 'status', _('服务状态'));
         s.anonymous = true;
         s.addremove = false;
-        s.render = L.bind(function(view, section_id) {
+        s.render = L.bind(function (view, section_id) {
             return E('div', { class: 'service-status-card' }, [
                 E('h3', { class: 'cbi-section-title' }, _('服务状态')),
                 E('div', { class: 'status-grid' }, [
@@ -136,23 +136,23 @@ return view.extend({
             var url = '/cgi-bin/luci/admin/services/xiaoai-mqtt/status';
             var timestamp = new Date().getTime();
             var cacheBusterUrl = url + '?_=' + timestamp;
-            
-            L.Request.get(cacheBusterUrl).then(function(xhr) {
+
+            L.Request.get(cacheBusterUrl).then(function (xhr) {
                 try {
                     var status = JSON.parse(xhr.responseText);
-                    
+
                     // 更新服务状态
-                    updateElementStatus('service_status', function() {
+                    updateElementStatus('service_status', function () {
                         var statusText = status.service === 'running' ? _('运行中') : _('已停止');
                         var statusClass = status.service === 'running' ? 'running' : 'stopped';
                         return { text: statusText, className: statusClass };
                     });
-                    
+
                     // 更新MQTT状态
-                    updateElementStatus('mqtt_status', function() {
+                    updateElementStatus('mqtt_status', function () {
                         var statusText = '';
                         var statusClass = '';
-                        switch(status.mqtt) {
+                        switch (status.mqtt) {
                             case 'connected':
                                 statusText = _('已连接');
                                 statusClass = 'status-connected';
@@ -175,14 +175,14 @@ return view.extend({
                         }
                         return { text: statusText, className: statusClass };
                     });
-                    
+
                     // 更新最近操作
-                    updateElementStatus('last_action', function() {
+                    updateElementStatus('last_action', function () {
                         return { text: status.last_action || _('无'), className: '' };
                     });
-                    
+
                     // 更新日志统计
-                    updateElementStatus('log_stats', function() {
+                    updateElementStatus('log_stats', function () {
                         if (status.log_stats) {
                             var stats = status.log_stats.split('|');
                             if (stats.length >= 2) {
@@ -193,12 +193,12 @@ return view.extend({
                         }
                         return { text: _('无日志'), className: '' };
                     });
-                    
+
                     // 更新MQTT控制按钮
                     var mqttControlBtn = document.getElementById('mqtt_control_btn');
                     if (mqttControlBtn) {
                         mqttControlBtn.style.display = 'inline-block';
-                        
+
                         if (status.service !== 'running') {
                             mqttControlBtn.textContent = _('服务未运行');
                             mqttControlBtn.disabled = true;
@@ -217,53 +217,52 @@ return view.extend({
                             mqttControlBtn.className = 'cbi-button cbi-button-action';
                         }
                     }
-                    
+
                     // 更新服务控制按钮状态
                     var startBtn = document.getElementById('start_service_btn');
                     var stopBtn = document.getElementById('stop_service_btn');
                     var restartBtn = document.getElementById('restart_service_btn');
-                    
+
                     if (startBtn) {
                         startBtn.disabled = status.service === 'running';
                         startBtn.className = status.service === 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-action';
                     }
-                    
+
                     if (stopBtn) {
                         stopBtn.disabled = status.service !== 'running';
                         stopBtn.className = status.service !== 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-negative';
                     }
-                    
+
                     if (restartBtn) {
                         restartBtn.disabled = status.service !== 'running';
                         restartBtn.className = status.service !== 'running' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-reset';
                     }
-                    
+
                 } catch (e) {
                     console.error('解析状态响应失败:', e);
-                    // 显示解析错误
-                    showErrorStatus('service_status', _('解析失败'));
-                    showErrorStatus('mqtt_status', _('解析失败'));
-                    showErrorStatus('last_action', _('解析失败'));
-                    showErrorStatus('log_stats', _('解析失败'));
+                    // 显示解析错误，但不覆盖之前的有效状态（如果只是临时的网络问题）
+                    // 只有在连续失败时才显示错误
+                    // showErrorStatus('service_status', _('解析失败'));
+                    console.log('状态数据无效，可能服务未完全启动');
                 }
-                
+
                 // 3秒后再次更新
                 setTimeout(updateStatus, 3000);
-                
-            }).catch(function(err) {
+
+            }).catch(function (err) {
                 console.error('获取状态失败:', err);
-                
+
                 // 显示错误状态
                 showErrorStatus('service_status', _('获取失败'));
                 showErrorStatus('mqtt_status', _('获取失败'));
                 showErrorStatus('last_action', _('获取失败'));
                 showErrorStatus('log_stats', _('获取失败'));
-                
+
                 // 5秒后重试
                 setTimeout(updateStatus, 5000);
             });
         }
-        
+
         // 辅助函数：更新元素状态
         function updateElementStatus(elementId, getStatusInfo) {
             var element = document.getElementById(elementId);
@@ -273,12 +272,12 @@ return view.extend({
                 if (spinning) {
                     element.removeChild(spinning);
                 }
-                
+
                 // 清除现有内容
                 while (element.firstChild) {
                     element.removeChild(element.firstChild);
                 }
-                
+
                 // 获取状态信息
                 var statusInfo = getStatusInfo();
                 if (statusInfo) {
@@ -291,7 +290,7 @@ return view.extend({
                 }
             }
         }
-        
+
         // 辅助函数：显示错误状态
         function showErrorStatus(elementId, errorText) {
             var element = document.getElementById(elementId);
@@ -301,12 +300,12 @@ return view.extend({
                 if (spinning) {
                     element.removeChild(spinning);
                 }
-                
+
                 // 清除现有内容
                 while (element.firstChild) {
                     element.removeChild(element.firstChild);
                 }
-                
+
                 // 创建错误文本
                 var errorSpan = document.createElement('span');
                 errorSpan.textContent = errorText;
@@ -314,48 +313,48 @@ return view.extend({
                 element.appendChild(errorSpan);
             }
         }
-        
+
         // 初始化状态更新和按钮事件处理
         function initStatusUpdate() {
             // 立即开始更新状态
             updateStatus();
-            
+
             // MQTT控制按钮事件处理
             var mqttControlBtn = document.getElementById('mqtt_control_btn');
             if (mqttControlBtn) {
-                mqttControlBtn.addEventListener('click', function() {
+                mqttControlBtn.addEventListener('click', function () {
                     var btn = this;
                     var originalText = btn.textContent;
-                    
+
                     // 禁用按钮并显示加载状态
                     btn.disabled = true;
                     btn.textContent = _('处理中...');
                     btn.className = 'cbi-button cbi-button-reset';
-                    
+
                     // 发送重新连接请求
                     L.Request.post('/cgi-bin/luci/admin/services/xiaoai-mqtt/reconnect', {
                         json: true
-                    }).then(function(xhr) {
+                    }).then(function (xhr) {
                         var response = JSON.parse(xhr.responseText);
                         if (response.success) {
                             btn.textContent = _('已发送重新连接请求');
                             // 3秒后恢复按钮状态
-                            setTimeout(function() {
+                            setTimeout(function () {
                                 // 按钮状态会在下一次轮询时更新
                             }, 3000);
                         } else {
                             btn.textContent = _('失败: ') + response.message;
                             btn.className = 'cbi-button cbi-button-negative';
                             // 5秒后恢复按钮状态
-                            setTimeout(function() {
+                            setTimeout(function () {
                                 // 按钮状态会在下一次轮询时更新
                             }, 5000);
                         }
-                    }).catch(function(err) {
+                    }).catch(function (err) {
                         btn.textContent = _('请求失败');
                         btn.className = 'cbi-button cbi-button-negative';
                         // 5秒后恢复按钮状态
-                        setTimeout(function() {
+                        setTimeout(function () {
                             // 按钮状态会在下一次轮询时更新
                         }, 5000);
                     });
@@ -366,19 +365,19 @@ return view.extend({
             function setupServiceControlButton(buttonId, endpoint, successMessage) {
                 var button = document.getElementById(buttonId);
                 if (button) {
-                    button.addEventListener('click', function() {
+                    button.addEventListener('click', function () {
                         var btn = this;
                         var originalText = btn.textContent;
-                        
+
                         // 禁用按钮并显示加载状态
                         btn.disabled = true;
                         btn.textContent = _('处理中...');
                         btn.className = 'cbi-button cbi-button-reset';
-                        
+
                         // 发送服务控制请求
                         L.Request.post('/cgi-bin/luci/admin/services/xiaoai-mqtt/' + endpoint, {
                             json: true
-                        }).then(function(xhr) {
+                        }).then(function (xhr) {
                             var response = JSON.parse(xhr.responseText);
                             if (response.success) {
                                 btn.textContent = successMessage || _('操作成功');
@@ -386,22 +385,22 @@ return view.extend({
                                 // 立即更新状态
                                 setTimeout(updateStatus, 500);
                                 // 3秒后恢复按钮状态
-                                setTimeout(function() {
+                                setTimeout(function () {
                                     // 按钮状态会在下一次轮询时更新
                                 }, 3000);
                             } else {
                                 btn.textContent = _('失败: ') + response.message;
                                 btn.className = 'cbi-button cbi-button-negative';
                                 // 5秒后恢复按钮状态
-                                setTimeout(function() {
+                                setTimeout(function () {
                                     // 按钮状态会在下一次轮询时更新
                                 }, 5000);
                             }
-                        }).catch(function(err) {
+                        }).catch(function (err) {
                             btn.textContent = _('请求失败');
                             btn.className = 'cbi-button cbi-button-negative';
                             // 5秒后恢复按钮状态
-                            setTimeout(function() {
+                            setTimeout(function () {
                                 // 按钮状态会在下一次轮询时更新
                             }, 5000);
                         });
@@ -415,7 +414,7 @@ return view.extend({
             setupServiceControlButton('restart_service_btn', 'restart', _('重启成功'));
         }
 
-        return m.render().then(function(node) {
+        return m.render().then(function (node) {
             // 启动状态更新循环
             setTimeout(initStatusUpdate, 500);
             return node;
