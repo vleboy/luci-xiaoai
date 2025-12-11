@@ -302,6 +302,13 @@ local function read_pid_file(path)
     return pid
 end
 
+-- 进程存活检查
+local function is_process_alive(pid)
+    if not pid then return false end
+    local stat = nixio.fs.stat("/proc/"..pid)
+    return stat and stat.type == "dir"
+end
+
 -- 启动mosquitto_sub进程
 local function start_mosquitto_sub()
     local config = uci:get_all("xiaoai-mqtt", "mqtt") or {}
@@ -386,12 +393,7 @@ local function start_mosquitto_sub()
     return pid
 end
 
--- 进程存活检查
-local function is_process_alive(pid)
-    if not pid then return false end
-    local stat = nixio.fs.stat("/proc/"..pid)
-    return stat and stat.type == "dir"
-end
+
 
 -- 处理订阅消息
 local function process_messages()
@@ -483,6 +485,9 @@ local function main_loop()
     update_status("mqtt_connection", "connecting")
     
     while not should_exit do
+        -- 增加详细调试日志: 循环开始
+        -- write_log("调试: 主循环 tick") 
+        
         local success, err = pcall(function()
             if not is_process_alive(pid) then
                 -- 清理旧进程
@@ -493,9 +498,10 @@ local function main_loop()
                 end
                 
                 -- 启动新进程
+                write_log("尝试启动 mosquitto_sub...")
                 pid = start_mosquitto_sub()
                 if not pid then
-                    update_status("mqtt_connection", "disconnected") -- 或 error
+                    update_status("mqtt_connection", "disconnected") 
                     reconnect_delay = math.min(reconnect_delay * 2, 300)
                     write_log(string.format("启动进程失败，等待 %d 秒后重试...", reconnect_delay))
                     nixio.nanosleep(reconnect_delay)
@@ -507,9 +513,10 @@ local function main_loop()
                 end
             else
                 -- 处理消息
+                -- write_log("处理消息...")
                 process_messages()
+                
                 -- 只有当进程存活且没有报错退出时，才认为是connected
-                -- 这里假设只要进程活着就是连接成功的（mosquitto_sub如果连接失败通常会退出）
                 update_status("mqtt_connection", "connected") 
                 nixio.nanosleep(3)
                 update_status("service_heartbeat", os.date("%Y-%m-%d %H:%M:%S"))
@@ -517,7 +524,16 @@ local function main_loop()
         end)
         
         if not success then
-            write_log("主循环错误: " .. tostring(err))
+            -- 强制输出错误到 stderr
+            local err_msg = tostring(err)
+            if io.stderr then
+                io.stderr:write("主循环崩溃: " .. err_msg .. "\n")
+                if debug then
+                    io.stderr:write(debug.traceback() .. "\n")
+                end
+            end
+            
+            write_log("主循环严重错误: " .. err_msg)
             write_log("等待 10 秒后继续...")
             nixio.nanosleep(10)
         end
