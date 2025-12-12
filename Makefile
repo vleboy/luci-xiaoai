@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xiaoai-mqtt
-PKG_VERSION:=25.12.11.07
+PKG_VERSION:=V1.0.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=vleboy <vleboy@gmail.com>
@@ -10,7 +10,7 @@ PKG_LICENSE:=GPL-3.0
 PKG_CONFIG_DEPENDS:=CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_MQTT_SSL
 
 LUCI_TITLE:=XiaoAi MQTT Control Interface
-LUCI_DEPENDS:=+lua +mosquitto-client
+LUCI_DEPENDS:=+lua +mosquitto-client +etherwake +samba4-admin
 LUCI_PKGARCH:=all
 
 
