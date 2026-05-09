@@ -88,7 +88,7 @@ return view.extend({
         o.rmempty = true;
         o.default = '9501';
 
-        o = s.option(form.Value, 'mqtt_client_id', _('客户端ID'));
+        o = s.option(form.Value, 'mqtt_client_id', _('巴法云key'));
         o.placeholder = _('随机生成');
         o.rmempty = true;
 
