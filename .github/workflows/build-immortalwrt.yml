@@ -53,9 +53,11 @@ jobs:
       - name: 确保 luci feed（Makefile 依赖 include luci.mk）
         working-directory: immortalwrt
         run: |
+          VERSION="${{ github.event.inputs.firmware_version }}"
+          BRANCH="openwrt-${VERSION%.*}"
           if ! grep -q '^src-git luci' feeds.conf feeds.conf.default 2>/dev/null; then
-            echo "src-git luci https://github.com/immortalwrt/luci.git;openwrt-${{ github.event.inputs.firmware_version }}" >> feeds.conf
-            echo "已追加 luci feed"
+            echo "src-git luci https://github.com/immortalwrt/luci.git;${BRANCH}" >> feeds.conf
+            echo "已追加 luci feed (${BRANCH})"
           else
             echo "feeds 已包含 luci"
           fi
@@ -63,7 +65,8 @@ jobs:
       - name: 复制插件源码到 SDK
         run: |
           mkdir -p immortalwrt/package/luci-app-xiaoai-mqtt
-          rsync -av --exclude='.git' "$GITHUB_WORKSPACE/" immortalwrt/package/luci-app-xiaoai-mqtt/
+          # 必须排除 immortalwrt（SDK 自身）与 .git，否则会把 SDK 递归复制进自身导致失败
+          rsync -av --exclude='immortalwrt' --exclude='.git' "$GITHUB_WORKSPACE/" immortalwrt/package/luci-app-xiaoai-mqtt/
 
       - name: 更新并安装 feeds
         working-directory: immortalwrt
