@@ -106,6 +106,10 @@ return view.extend({
         o.rmempty = true;
         o.datatype = 'macaddr';
 
+        o = s.option(form.Value, 'wol_iface', _('唤醒网卡'));
+        o.placeholder = 'br-lan';
+        o.rmempty = true;
+
         o = s.option(form.DynamicList, 'on_msgs', _('触发消息'));
         o.placeholder = 'on';
         o.rmempty = true;
@@ -325,38 +329,30 @@ return view.extend({
                 mqttControlBtn.addEventListener('click', function () {
                     var btn = this;
                     var originalText = btn.textContent;
+                    var originalClass = btn.className;
 
                     // 禁用按钮并显示加载状态
                     btn.disabled = true;
                     btn.textContent = _('处理中...');
                     btn.className = 'cbi-button cbi-button-reset';
 
-                    // 发送重新连接请求
+                    // 发送重新连接请求（json:true 时 Promise 直接 resolve 解析后的对象，勿再 JSON.parse）
                     L.Request.post('/cgi-bin/luci/admin/services/xiaoai-mqtt/reconnect', {
                         json: true
-                    }).then(function (xhr) {
-                        var response = JSON.parse(xhr.responseText);
+                    }).then(function (response) {
+                        response = response || {};
                         if (response.success) {
                             btn.textContent = _('已发送重新连接请求');
-                            // 3秒后恢复按钮状态
-                            setTimeout(function () {
-                                // 按钮状态会在下一次轮询时更新
-                            }, 3000);
                         } else {
-                            btn.textContent = _('失败: ') + response.message;
+                            btn.textContent = _('失败: ') + (response.message || _('未知错误'));
                             btn.className = 'cbi-button cbi-button-negative';
-                            // 5秒后恢复按钮状态
-                            setTimeout(function () {
-                                // 按钮状态会在下一次轮询时更新
-                            }, 5000);
+                            btn.disabled = false;
                         }
                     }).catch(function (err) {
-                        btn.textContent = _('请求失败');
-                        btn.className = 'cbi-button cbi-button-negative';
-                        // 5秒后恢复按钮状态
-                        setTimeout(function () {
-                            // 按钮状态会在下一次轮询时更新
-                        }, 5000);
+                        // 请求失败：恢复按钮原状态（状态会由轮询继续更新）
+                        btn.textContent = originalText;
+                        btn.disabled = false;
+                        btn.className = originalClass;
                     });
                 });
             }
@@ -368,41 +364,33 @@ return view.extend({
                     button.addEventListener('click', function () {
                         var btn = this;
                         var originalText = btn.textContent;
+                        var originalClass = btn.className;
 
                         // 禁用按钮并显示加载状态
                         btn.disabled = true;
                         btn.textContent = _('处理中...');
                         btn.className = 'cbi-button cbi-button-reset';
 
-                        // 发送服务控制请求
+                        // 发送服务控制请求（json:true 时 Promise 直接 resolve 解析后的对象，勿再 JSON.parse）
                         L.Request.post('/cgi-bin/luci/admin/services/xiaoai-mqtt/' + endpoint, {
                             json: true
-                        }).then(function (xhr) {
-                            var response = JSON.parse(xhr.responseText);
+                        }).then(function (response) {
+                            response = response || {};
                             if (response.success) {
                                 btn.textContent = successMessage || _('操作成功');
                                 btn.className = 'cbi-button cbi-button-positive';
                                 // 立即更新状态
                                 setTimeout(updateStatus, 500);
-                                // 3秒后恢复按钮状态
-                                setTimeout(function () {
-                                    // 按钮状态会在下一次轮询时更新
-                                }, 3000);
                             } else {
-                                btn.textContent = _('失败: ') + response.message;
+                                btn.textContent = _('失败: ') + (response.message || _('未知错误'));
                                 btn.className = 'cbi-button cbi-button-negative';
-                                // 5秒后恢复按钮状态
-                                setTimeout(function () {
-                                    // 按钮状态会在下一次轮询时更新
-                                }, 5000);
+                                btn.disabled = false;
                             }
                         }).catch(function (err) {
-                            btn.textContent = _('请求失败');
-                            btn.className = 'cbi-button cbi-button-negative';
-                            // 5秒后恢复按钮状态
-                            setTimeout(function () {
-                                // 按钮状态会在下一次轮询时更新
-                            }, 5000);
+                            // 请求失败：恢复按钮原状态（状态会由轮询继续更新）
+                            btn.textContent = originalText;
+                            btn.disabled = false;
+                            btn.className = originalClass;
                         });
                     });
                 }

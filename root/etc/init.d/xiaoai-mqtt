@@ -13,39 +13,52 @@ start_service() {
     config_load "xiaoai-mqtt"
     config_get_bool enabled "main" "enabled" 0
     [ "$enabled" -eq 1 ] || return 0
-    
+
     # 清理残留状态
     rm -f /var/run/xiaoai-mqtt.status
+
+    # 清理残留的 mosquitto_sub 订阅进程（防止孤儿进程与同 client_id 会话抢占）
+    if [ -f /var/run/mosquitto_sub.pid ]; then
+        local old_pid
+        old_pid=$(cat /var/run/mosquitto_sub.pid 2>/dev/null)
+        [ -n "$old_pid" ] && kill -9 "$old_pid" 2>/dev/null
+        rm -f /var/run/mosquitto_sub.pid
+    fi
+    rm -f /tmp/mosquitto_sub.out
 
     # 启动进程
     procd_open_instance
     procd_set_param command /usr/bin/lua "/etc/xiaoai-mqtt/mqtt_client.lua"
-    
+
     # 自动重启设置
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
-    
+
     # 标准输出/错误重定向
     procd_set_param stdout 1
     procd_set_param stderr 1
-    
+
     # PID文件管理
     procd_set_param pidfile /var/run/xiaoai-mqtt.pid
-    
-    # 设置环境变量
-    procd_set_param env LUA_PATH="/usr/lib/lua/?.lua;/usr/lib/lua/?/init.lua"
-    procd_set_param env LUA_CPATH="/usr/lib/lua/?.so"
-    
-    # 设置停止超时（默认5秒，增加到30秒以确保正常停止）
-    procd_set_param env LUA_CPATH="/usr/lib/lua/?.so"
-    
+
+    # 设置环境变量（一次调用设置多个，避免重复的 env 数组）
+    procd_set_param env LUA_PATH="/usr/lib/lua/?.lua;/usr/lib/lua/?/init.lua" LUA_CPATH="/usr/lib/lua/?.so"
+
+    # 停止超时（默认5秒，增加到30秒以确保正常停止）
+    procd_set_param timeout 30
+
     procd_close_instance
 }
 
 stop_service() {
-    # 既然Lua脚本无法捕获信号进行清理，我们需要在init脚本中手动清理
+    # Lua 脚本无法捕获信号进行清理，需要在 init 脚本中手动清理订阅进程
     if [ -f /var/run/mosquitto_sub.pid ]; then
-         kill -9 $(cat /var/run/mosquitto_sub.pid) 2>/dev/null
-         rm -f /var/run/mosquitto_sub.pid
+        local old_pid
+        old_pid=$(cat /var/run/mosquitto_sub.pid 2>/dev/null)
+        # 仅当该 PID 确实还是 mosquitto_sub 时才终止，避免误杀被复用的 PID
+        if [ -n "$old_pid" ] && [ -r "/proc/$old_pid/cmdline" ] && grep -q mosquitto_sub "/proc/$old_pid/cmdline" 2>/dev/null; then
+            kill -9 "$old_pid" 2>/dev/null
+        fi
+        rm -f /var/run/mosquitto_sub.pid
     fi
     rm -f /tmp/mosquitto_sub.out
     rm -f /var/run/xiaoai-mqtt.status
