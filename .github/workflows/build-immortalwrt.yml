@@ -1,0 +1,112 @@
+name: 编译 ImmortalWrt 插件 (luci-app-xiaoai-mqtt)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "目标平台/架构，如 x86/64、ramips/mt7621"
+        required: true
+        default: "x86/64"
+      firmware_version:
+        description: "ImmortalWrt 固件版本"
+        required: true
+        default: "24.10.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache fastjar file g++ gawk \
+            gettext git libncurses5-dev libncursesw5-dev libssl-dev python3 \
+            python3-distutils python3-setuptools unzip wget rsync subversion swig \
+            time xsltproc zlib1g-dev zstd tree
+
+      - name: 计算 SDK 下载地址
+        id: sdk
+        run: |
+          TARGET="${{ github.event.inputs.target }}"
+          VERSION="${{ github.event.inputs.firmware_version }}"
+          TARGET_DASH="$(printf '%s' "$TARGET" | tr '/' '-')"
+          BASE_URL="https://mirror.nju.edu.cn/immortalwrt/releases/${VERSION}/targets/${TARGET}/"
+          SDK_FILE="$(curl -fsS "${BASE_URL}" | grep -oP "immortalwrt-sdk-.*?-${TARGET_DASH}_gcc-.*?Linux-x86_64\.tar\.zst" | head -n 1)"
+          if [ -z "${SDK_FILE}" ]; then
+            echo "无法找到匹配的 SDK 文件，请检查目标平台/版本: ${BASE_URL}"
+            exit 1
+          fi
+          echo "sdk_url=${BASE_URL}${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "target_dash=${TARGET_DASH}" >> "$GITHUB_OUTPUT"
+          echo "找到 SDK: ${SDK_FILE}"
+
+      - name: 下载并解压 SDK
+        run: |
+          wget -q "${{ steps.sdk.outputs.sdk_url }}" -O immortalwrt.tar.zst
+          mkdir -p immortalwrt
+          tar -I zstd -xf immortalwrt.tar.zst -C immortalwrt --strip-components 1
+
+      - name: 确保 luci feed（Makefile 依赖 include luci.mk）
+        working-directory: immortalwrt
+        run: |
+          if ! grep -q '^src-git luci' feeds.conf feeds.conf.default 2>/dev/null; then
+            echo "src-git luci https://github.com/immortalwrt/luci.git;openwrt-${{ github.event.inputs.firmware_version }}" >> feeds.conf
+            echo "已追加 luci feed"
+          else
+            echo "feeds 已包含 luci"
+          fi
+
+      - name: 复制插件源码到 SDK
+        run: |
+          mkdir -p immortalwrt/package/luci-app-xiaoai-mqtt
+          rsync -av --exclude='.git' "$GITHUB_WORKSPACE/" immortalwrt/package/luci-app-xiaoai-mqtt/
+
+      - name: 更新并安装 feeds
+        working-directory: immortalwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 配置插件
+        working-directory: immortalwrt
+        run: |
+          echo "CONFIG_PACKAGE_luci-app-xiaoai-mqtt=y" >> .config
+          make defconfig
+
+      - name: 编译插件
+        working-directory: immortalwrt
+        run: |
+          make package/luci-app-xiaoai-mqtt/compile V=s -j$(nproc)
+
+      - name: 整理产物
+        run: |
+          mkdir -p firmware
+          find immortalwrt/bin/packages -name 'luci-app-xiaoai-mqtt*.ipk' -exec cp {} firmware/ \;
+          if [ -z "$(ls firmware/ 2>/dev/null)" ]; then
+            echo "未找到编译产物 ipk"
+            exit 1
+          fi
+          cd firmware
+          for f in *.ipk; do
+            mv "$f" "${{ steps.sdk.outputs.target_dash }}-${{ github.event.inputs.firmware_version }}-${f}"
+          done
+          ls -l
+
+      - name: 上传 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-xiaoai-mqtt-${{ steps.sdk.outputs.target_dash }}-${{ github.event.inputs.firmware_version }}
+          path: firmware/*.ipk
+
+      - name: 创建作业摘要
+        run: |
+          echo "目标平台: ${{ github.event.inputs.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "固件版本: ${{ github.event.inputs.firmware_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "插件: luci-app-xiaoai-mqtt" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "生成文件:" >> "$GITHUB_STEP_SUMMARY"
+          ls -l firmware/ >> "$GITHUB_STEP_SUMMARY"

@@ -49,7 +49,24 @@ luci-app-xiaoai-mqtt/
 - `samba4-admin`（net rpc shutdown；请核实目标固件上 `net` 二进制的实际路径，
   代码默认调用 `/usr/bin/net`，若为 `/usr/sbin/net` 请修改 `mqtt_client.lua` 中 `execute_shutdown`）
 
-## 本地编译方法（SDK）
+## 编译方法
+
+### 方法1：GitHub Actions（推荐）
+
+1. 将代码推送到 GitHub 仓库（见下方"推送到 GitHub"）。
+2. 打开仓库 **Actions** 页面 → 左侧选择 **"编译 ImmortalWrt 插件 (luci-app-xiaoai-mqtt)"** → **Run workflow**。
+3. 配置参数后运行：
+   - **目标平台/架构**：如 `x86/64`（默认）、`ramips/mt7621`
+   - **固件版本**：如 `24.10.0`（默认）
+4. 构建完成后在作业页面的 **Artifacts** 下载 ipk 文件。
+
+> 工作流基于 ImmortalWrt SDK 交叉编译（`checkout@v4`），首次运行约 5–15 分钟；产物文件名格式为
+> `<平台>-<版本>-luci-app-xiaoai-mqtt_<插件版本>_<架构>.ipk`。
+> 依赖（luci-lua-nixio / mosquitto-client-nossl / etherwake / samba4-admin）由 opkg 在安装时自动解析。
+
+### 方法2：本地 SDK 编译（备选）
+
+**以下为本地编译步骤：**
 
 ### 1. 准备环境
 
@@ -148,3 +165,20 @@ cat /var/run/xiaoai-mqtt.status      # 状态文件
 2. **收不到消息**：确认巴法云私钥与主题正确；订阅进程输出在 `/tmp/mosquitto_sub.out`。
 3. **WOL 无效**：确认目标 MAC 与唤醒网卡正确，且目标与路由器在同一二层网络。
 4. **日志页清空按钮 403**：多为 LuCI CSRF token 问题，确认页面表单包含隐藏 token 字段。
+
+## 推送到 GitHub（使用 Actions 前）
+
+本仓库当前远程是局域网 Git 服务器（`origin`）。要使用 GitHub Actions，需要把代码推送到 GitHub：
+
+```bash
+# 1. 在 GitHub 上新建一个仓库（如 luci-app-xiaoai-mqtt，可私有）
+# 2. 添加 GitHub 远程并推送
+git remote add github https://github.com/<你的用户名>/luci-app-xiaoai-mqtt.git
+git push github master
+
+# 3. 之后每次本地有新的提交，同步推送即可
+git push github master
+```
+
+> 注意：`origin`（局域网服务器）与 `github` 是两个不同的远程；Actions 只需要 `github`。
+> 推送后 Actions 页面的工作流默认可手动触发（workflow_dispatch），无需额外配置。
