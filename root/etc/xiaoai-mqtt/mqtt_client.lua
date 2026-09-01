@@ -10,17 +10,13 @@ local function log_err(msg)
 end
 
 log_err("====== 服务初始化开始 ======")
-log_err("调试：Lua脚本开始执行")
 
 -- 尝试加载nixio库
-log_err("调试：加载nixio库")
 local nixio_loaded, nixio = pcall(require, "nixio")
 if not nixio_loaded then
     log_err("错误：无法加载nixio库: " .. tostring(nixio))
     os.exit(1)
 end
-
-log_err("调试：nixio库加载成功")
 
 -- 常量定义
 local LOG_FILE = "/var/log/xiaoai-mqtt.log"
@@ -32,6 +28,10 @@ local PID_FILE = "/var/run/xiaoai-mqtt.pid"
 -- 日志轮转配置
 local LOG_MAX_SIZE = 1024 * 1024  -- 1MB
 local LOG_MAX_FILES = 5
+
+-- 订阅输出文件读偏移与上限（声明必须在 start_mosquitto_sub / process_messages 之前，避免误用全局变量）
+local read_offset = 0
+local SUB_OUTPUT_MAX_SIZE = 1024 * 1024  -- 输出文件上限 1MB，超过则截断重置
 
 -- 简单的日志记录函数（避免递归调用）
 local check_log_rotation -- 前向声明
@@ -120,104 +120,15 @@ end
 
 check_log_rotation = check_and_rotate_log()
 
--- 写入PID文件
-local function write_pid_file()
-    local pid = nixio.getpid()
-    local fs = require "nixio.fs"
-    
-    -- 检查pid是否有效
-    if not pid then
-        write_log("错误：无法获取进程ID")
-        return false
-    end
-    
-    write_log(string.format("开始写入PID文件，当前PID: %d", pid))
-    write_log(string.format("PID文件路径: %s", PID_FILE))
-    
-    -- 确保目录存在
-    local dir = "/var/run"
-    if not fs.access(dir) then
-        write_log("目录 /var/run 不存在，尝试创建...")
-        local mkdir_success, mkdir_err = pcall(function()
-            fs.mkdir(dir)
-        end)
-        if mkdir_success then
-            write_log("目录创建成功")
-        else
-            write_log("目录创建失败: " .. tostring(mkdir_err))
-        end
-    else
-        write_log("目录 /var/run 已存在")
-    end
-    
-    -- 检查目录权限（安全地处理可能为nil的mode）
-    local dir_stat = fs.stat(dir)
-    if dir_stat then
-        local mode = dir_stat.mode
-        if mode then
-            write_log(string.format("目录权限: %o", mode))
-        else
-            write_log("目录权限: 无法获取权限信息")
-        end
-    end
-    
-    -- 尝试写入PID文件
-    write_log("尝试写入PID文件...")
-    local pcall_success, write_result = pcall(function()
-        return fs.writefile(PID_FILE, tostring(pid))
-    end)
-    
-    if pcall_success and write_result then  -- pcall成功且writefile返回true
-        fs.chmod(PID_FILE, 644)
-        write_log(string.format("PID文件写入成功: %d", pid))
-        
-        -- 验证文件是否真的存在
-        if fs.access(PID_FILE) then
-            local file_content = fs.readfile(PID_FILE) or ""
-            write_log(string.format("验证PID文件内容: %s", file_content))
-            return true
-        else
-            write_log("警告：PID文件写入成功但文件不存在")
-            return false
-        end
-    else
-        if not pcall_success then
-            write_log("无法写入PID文件，pcall错误: " .. tostring(write_result))
-        else
-            write_log("无法写入PID文件，writefile返回false")
-        end
-        write_log("路径: " .. PID_FILE)
-        return false
-    end
-end
-
--- write_pid_file() -- 移除：由procd管理PID文件
-
 -- 尝试加载uci库
-io.stderr:write(string.format("[%s] 调试：尝试加载uci库\n", os.date("%Y-%m-%d %H:%M:%S")))
 local uci_loaded, uci_result = pcall(require, "luci.model.uci")
 local uci
 if uci_loaded then
     uci = uci_result.cursor()
-    io.stderr:write(string.format("[%s] 调试：uci库加载成功\n", os.date("%Y-%m-%d %H:%M:%S")))
 else
-    io.stderr:write(string.format("[%s] 错误：无法加载uci库: %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(uci_result)))
-    io.stderr:write(string.format("[%s] 错误：UCI库是必需的，服务启动失败\n", os.date("%Y-%m-%d %H:%M:%S")))
+    log_err("错误：无法加载uci库: " .. tostring(uci_result))
+    log_err("错误：UCI库是必需的，服务启动失败")
     os.exit(1) -- 如果UCI库无法加载，则退出
-end
-
--- 定义 os.capture 函数（用于执行命令并捕获输出）
-function os.capture(cmd, raw)
-    local f, err = io.popen(cmd, 'r')
-    if not f then return nil, err end
-    local s, err = f:read('*a')
-    f:close()
-    if not s then return nil, err end
-    if raw then return s end
-    s = string.gsub(s, '^%s+', '')
-    s = string.gsub(s, '%s+$', '')
-    s = string.gsub(s, '[\n\r]+', ' ')
-    return s
 end
 
 -- 状态更新（优化版）
@@ -263,20 +174,39 @@ local function update_status(key, value)
     end
 end
 
--- WOL执行
-local function execute_wol(mac)
-    local cmd = string.format("/usr/bin/etherwake -i br-lan %q", mac)
-    local result = os.capture(cmd)
-    write_log(string.format("执行开机: %s (%s)", cmd, result and "成功" or "失败"))
-    update_status("last_action", os.date().." WOL发送至 "..mac)
+-- shell 安全引用（防止命令注入；Lua %q 对 $ 等字符不转义，不能直接用）
+local function shell_quote(s)
+    return "'" .. tostring(s):gsub("'", "'\''") .. "'"
 end
 
--- SMB关机
+-- WOL执行（返回是否成功）
+local function execute_wol(mac)
+    local wol_config = uci:get_all("xiaoai-mqtt", "wol") or {}
+    local iface = wol_config.wol_iface or "br-lan"
+    if not mac or mac == "" then
+        write_log("WOL配置缺少MAC地址，已跳过")
+        return false
+    end
+    local cmd = string.format("/usr/bin/etherwake -i %s %s", shell_quote(iface), shell_quote(mac))
+    local ok = os.execute(cmd) == 0
+    write_log(string.format("执行开机: %s (%s)", cmd, ok and "成功" or "失败"))
+    update_status("last_action", os.date().." WOL发送至 "..mac)
+    return ok
+end
+
+-- SMB关机（返回是否成功；密码不写入日志）
 local function execute_shutdown(ip, user, pass)
-    local cmd = string.format("/usr/bin/net rpc shutdown -I %s -U '%s%%%s' -t 1 -f", ip, user, pass)
-    local result = os.capture(cmd)
-    write_log(string.format("执行关机: %s (%s)", cmd, result and "成功" or "失败"))
+    if not ip or ip == "" or not user or user == "" or not pass or pass == "" then
+        write_log("关机配置不完整(ip/user/pass)，已跳过关机操作")
+        return false
+    end
+    local auth = user .. "%" .. pass
+    local cmd = string.format("/usr/bin/net rpc shutdown -I %s -U %s -t 1 -f", shell_quote(ip), shell_quote(auth))
+    local ok = os.execute(cmd) == 0
+    -- 日志脱敏：不记录任何含密码的命令
+    write_log(string.format("执行关机: net rpc shutdown -I %s (%s)", ip, ok and "成功" or "失败"))
     update_status("last_action", os.date().." 关闭 "..ip)
+    return ok
 end
 
 -- 读取PID文件
@@ -304,43 +234,64 @@ local function is_process_alive(pid)
     return stat and stat.type == "dir"
 end
 
+-- 清理残留的 mosquitto_sub 进程（防止孤儿进程与同 client_id 会话抢占）
+local function cleanup_sub_process()
+    local fs = require "nixio.fs"
+    if fs.access(SUB_PID_FILE) then
+        local old_pid = read_pid_file(SUB_PID_FILE)
+        if old_pid and is_process_alive(old_pid) then
+            write_log(string.format("清理残留订阅进程 PID: %d", old_pid))
+            os.execute("kill -9 " .. old_pid .. " 2>/dev/null")
+        end
+        os.remove(SUB_PID_FILE)
+    end
+end
+
 -- 启动mosquitto_sub进程
 local function start_mosquitto_sub()
     local config = uci:get_all("xiaoai-mqtt", "mqtt") or {}
-    
+
     -- 参数验证
-    local required = {"mqtt_broker", "mqtt_port", "mqtt_topic", "mqtt_client_id"}
+    local required = {"mqtt_broker", "mqtt_topic", "mqtt_client_id"}
     for _, k in ipairs(required) do
         if not config[k] or config[k] == "" then
             write_log("配置错误: 缺少必要参数 "..k)
             return nil
         end
     end
-    
-    -- 清理旧的PID文件
-    if require("nixio.fs").access(SUB_PID_FILE) then
-        os.remove(SUB_PID_FILE)
+
+    -- 端口必须为数字（UCI 返回字符串，直接 %d 格式化会崩溃）
+    local port = tonumber(config.mqtt_port)
+    if not port or port < 1 or port > 65535 then
+        write_log("配置错误: 无效的MQTT端口: " .. tostring(config.mqtt_port))
+        return nil
     end
-    -- 清理旧的输出文件，避免读取到上一次的错误
+
+    -- 清理残留的订阅进程（防止孤儿进程/同 client_id 会话抢占）
+    cleanup_sub_process()
+
+    -- 清理旧的输出文件与PID文件，避免读取到上一次的错误
     if require("nixio.fs").access(SUB_OUTPUT_FILE) then
         os.remove(SUB_OUTPUT_FILE)
     end
+    if require("nixio.fs").access(SUB_PID_FILE) then
+        os.remove(SUB_PID_FILE)
+    end
+    read_offset = 0 -- 重置读偏移
 
-    -- 构建命令
-    -- 使用 os.execute 而不是 io.popen，避免管道阻塞
-    -- 确保所有输出都被重定向，并且在后台运行
+    -- 构建命令（全部 shell 引用防注入；输出文件用 >> 追加写，配合读偏移避免截断竞态）
     local cmd = string.format(
-        "mosquitto_sub -h '%s' -p %d -t '%s' -i '%s' --protocol-version mqttv311 -q 1 -v > '%s' 2>&1 & echo $! > '%s'",
-        config.mqtt_broker,
-        config.mqtt_port,
-        config.mqtt_topic,
-        config.mqtt_client_id,
-        SUB_OUTPUT_FILE,
-        SUB_PID_FILE
+        "mosquitto_sub -h %s -p %d -t %s -i %s --protocol-version mqttv311 -q 1 -v >> %s 2>&1 & echo $! > %s",
+        shell_quote(config.mqtt_broker),
+        port,
+        shell_quote(config.mqtt_topic),
+        shell_quote(config.mqtt_client_id),
+        shell_quote(SUB_OUTPUT_FILE),
+        shell_quote(SUB_PID_FILE)
     )
-    
-    write_log("启动命令: "..cmd:gsub(" -P '%S+'", "")) -- 安全过滤
-    
+
+    write_log("正在启动 mosquitto_sub ...")
+
     local execute_status = os.execute(cmd)
     
     -- 给一点时间让文件系统同步和进程启动
@@ -390,52 +341,50 @@ end
 
 
 
--- 处理订阅消息
+-- 处理订阅消息（增量读取，不丢弃消息）
+-- 返回 "ok"（有内容）/ "fatal"（连接级错误，需重启订阅进程）/ nil（无新内容）
 local function process_messages()
     local fs = require "nixio.fs"
     
-    -- 使用更高效的文件读取方式，只读取新内容
+    -- 打开文件并定位到上次读取位置
     local file = io.open(SUB_OUTPUT_FILE, "r")
-    if not file then return end
+    if not file then return nil end
     
+    file:seek("set", read_offset)
     local content = file:read("*a")
+    local new_offset = file:seek("end")
     file:close()
     
-    if content == "" then return end
+    if not content or content == "" then return nil end
     
-    -- 限制读取大小，防止内存占用过大
-    content = content:sub(1, 8192)  -- 增加到8KB，但限制最大读取
-    
-    -- 错误检测
-    if content:find("Connection refused") then
-        write_log("连接被拒绝: "..content:match("Connection refused.-\n"))
-        os.exit(1)
+    -- 错误检测：连接级错误返回 "fatal"，由主循环重启订阅进程
+    -- （不再 os.exit，避免进程退出后留下孤儿 mosquitto_sub）
+    if content:find("Connection refused", 1, true) then
+        write_log("连接被拒绝，等待重启订阅进程")
+        return "fatal"
     end
-    if content:find("Not authorized") then
-        write_log("订阅未授权，请检查主题绑定")
-        os.exit(1)
+    if content:find("Not authorized", 1, true) then
+        write_log("订阅未授权，请检查主题绑定与client_id")
+        return "fatal"
+    end
+    if content:find("Socket error", 1, true) or content:find("Connection lost", 1, true) then
+        write_log("检测到连接断开，等待重启订阅进程")
+        return "fatal"
     end
     
-    -- 缓存配置，避免每次消息都读取UCI
+    -- 缓存配置，避免每条消息都读取UCI
     local wol_config_cache = nil
     local shutdown_config_cache = nil
     
-    -- 消息处理
+    -- 消息处理（处理不完不丢弃，留到下一轮）
     local processed_count = 0
     for line in content:gmatch("[^\r\n]+") do
-        processed_count = processed_count + 1
-        if processed_count > 50 then  -- 限制单次处理的消息数量
-            write_log("警告：单次处理消息过多，跳过剩余消息")
-            break
-        end
-        
         local topic, payload = line:match("(%S+)%s+(.+)$")
         if topic and payload then
-            -- 延迟日志记录，减少I/O操作
-            local should_log = (processed_count <= 5)  -- 只记录前5条消息
-            
-            if should_log then
-                write_log("原始输出: "..line)
+            processed_count = processed_count + 1
+            -- 只记录前5条消息，避免刷屏
+            if processed_count <= 5 then
+                write_log("MQTT消息: "..topic.." -> "..payload)
             end
             
             -- WOL处理
@@ -464,12 +413,18 @@ local function process_messages()
         end
     end
     
-    -- 清空已处理内容（通过覆盖文件）
-    fs.writefile(SUB_OUTPUT_FILE, "")
+    -- 已处理到 EOF，更新读偏移
+    read_offset = new_offset
+    
+    -- 输出文件过大时截断并重置偏移（>> 追加模式下 O_APPEND 保证后续写入在 EOF，截断安全）
+    if new_offset > SUB_OUTPUT_MAX_SIZE then
+        fs.writefile(SUB_OUTPUT_FILE, "")
+        read_offset = 0
+        write_log("订阅输出文件超过上限，已重置")
+    end
+    
+    return "ok"
 end
-
--- 主循环控制变量
-local should_exit = false
 
 -- 主循环
 local function main_loop()
@@ -479,10 +434,7 @@ local function main_loop()
     update_status("service_status", "running")
     update_status("mqtt_connection", "connecting")
     
-    while not should_exit do
-        -- 增加详细调试日志: 循环开始
-        -- write_log("调试: 主循环 tick") 
-        
+    while true do
         local success, err = pcall(function()
             if not is_process_alive(pid) then
                 -- 清理旧进程
@@ -507,13 +459,28 @@ local function main_loop()
                     nixio.nanosleep(2)
                 end
             else
-                -- 处理消息
-                -- write_log("处理消息...")
-                process_messages()
+                -- 处理消息（增量读取）
+                local msg_status = process_messages()
                 
-                -- 只有当进程存活且没有报错退出时，才认为是connected
-                update_status("mqtt_connection", "connected") 
-                nixio.nanosleep(3)
+                if msg_status == "fatal" then
+                    -- 连接级错误：终止当前订阅进程，指数退避后重启
+                    -- （不再 os.exit，避免孤儿进程与 procd 反复 respawn）
+                    write_log("订阅进程出现连接错误，终止并准备重启...")
+                    if pid then
+                        os.execute("kill -9 " .. pid .. " 2>/dev/null")
+                    end
+                    pid = nil
+                    os.remove(SUB_PID_FILE)
+                    reconnect_delay = math.min(reconnect_delay * 2, 300)
+                    update_status("mqtt_connection", "disconnected")
+                    write_log(string.format("等待 %d 秒后重试...", reconnect_delay))
+                    nixio.nanosleep(reconnect_delay)
+                else
+                    -- 进程存活且无连接错误标记，视为已连接
+                    reconnect_delay = 5
+                    update_status("mqtt_connection", "connected")
+                    nixio.nanosleep(3)
+                end
                 update_status("service_heartbeat", os.date("%Y-%m-%d %H:%M:%S"))
             end
         end)
@@ -548,45 +515,6 @@ local function main_loop()
     -- 确保完全退出
     write_log("服务正常退出")
     os.exit(0)
-end
-
--- 强制重新连接函数
-local function force_reconnect()
-    write_log("强制重新连接MQTT...")
-    update_status("mqtt_connection", "reconnecting")
-    
-    -- 读取当前PID
-    local sub_pid = read_pid_file(SUB_PID_FILE)
-    if sub_pid then
-        -- 终止当前进程
-        os.execute(string.format("kill -9 %d 2>/dev/null", sub_pid))
-        write_log(string.format("已终止订阅进程 PID: %d", sub_pid))
-        os.remove(SUB_PID_FILE)
-    end
-end
-
-
-
-local function cleanup()
-    -- 终止主进程（通过 PID 文件）
-    local main_pid = read_pid_file(PID_FILE)
-    if main_pid then
-        os.execute(string.format("kill -9 %d 2>/dev/null", main_pid))
-        write_log(string.format("已终止主进程 PID: %d", main_pid))
-    end
-
-    -- 终止 mosquitto_sub 进程（通过 PID 文件）
-    local sub_pid = read_pid_file(SUB_PID_FILE)
-    if sub_pid then
-        os.execute(string.format("kill -9 %d 2>/dev/null", sub_pid))
-        write_log(string.format("已终止订阅进程 PID: %d", sub_pid))
-    end
-
-    -- 删除残留文件
-    os.remove(SUB_PID_FILE)
-    os.remove(SUB_OUTPUT_FILE)
-    os.remove(PID_FILE)
-    write_log("清理完成")
 end
 
 -- 注册信号处理
